@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shift Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  :root{
+    --paper:#F1F4F2;
+    --surface:#FFFFFF;
+    --surface-2:#E9EFEC;
+    --ink:#16211D;
+    --ink-soft:#4B5B54;
+    --ink-faint:#7C8B84;
+    --line:#DDE6E1;
+    --accent:#2F6F5E;
+    --accent-strong:#245A4C;
+    --accent-soft:#E4F0EC;
+    --on-accent:#F6FBF9;
+    --open:#35608F;
+    --open-soft:#E7EEF6;
+    --flagged:#B4770F;
+    --flagged-soft:#FBEEDA;
+    --danger:#B23A34;
+    --danger-soft:#F8E4E2;
+    --shadow: 0 1px 2px rgba(22,33,29,0.06), 0 8px 24px -12px rgba(22,33,29,0.18);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#121815; --surface:#1A211D; --surface-2:#212B25; --ink:#EAF2EE; --ink-soft:#9FB3AA;
+      --ink-faint:#71857C; --line:#29352F; --accent:#4FA98C; --accent-strong:#69C1A4; --accent-soft:#17332B;
+      --on-accent:#0D1A16; --open:#7DAAE0; --open-soft:#16283C; --flagged:#E0A24B; --flagged-soft:#3A2A12;
+      --danger:#E2726B; --danger-soft:#3A1917;
+      --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 12px 30px -14px rgba(0,0,0,0.55);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#121815; --surface:#1A211D; --surface-2:#212B25; --ink:#EAF2EE; --ink-soft:#9FB3AA;
+    --ink-faint:#71857C; --line:#29352F; --accent:#4FA98C; --accent-strong:#69C1A4; --accent-soft:#17332B;
+    --on-accent:#0D1A16; --open:#7DAAE0; --open-soft:#16283C; --flagged:#E0A24B; --flagged-soft:#3A2A12;
+    --danger:#E2726B; --danger-soft:#3A1917;
+    --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 12px 30px -14px rgba(0,0,0,0.55);
+    color-scheme: dark;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:'Inter',system-ui,-apple-system,sans-serif; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{ max-width:760px; margin:0 auto; padding:24px 20px 96px; }
+  h1,h2,h3{ font-family:'Fraunces',Georgia,serif; text-wrap:balance; margin:0; }
+  .mono{ font-family:'IBM Plex Mono',ui-monospace,monospace; font-variant-numeric:tabular-nums; }
+  a{ color:inherit; }
+  button{ font-family:inherit; }
+
+  .topbar{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding-block:18px 6px; }
+  .brand{ display:flex; align-items:baseline; gap:9px; }
+  .brand-mark{ font-size:22px; }
+  .brand h1{ font-size:21px; font-weight:600; letter-spacing:-0.01em; }
+  .whoami{ display:flex; align-items:center; gap:10px; font-size:13.5px; color:var(--ink-soft); }
+  .whoami b{ color:var(--ink); font-weight:600; }
+  .whoami .pill-role{
+    font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+    background:var(--accent-soft); color:var(--accent-strong); padding:2px 8px; border-radius:99px; font-weight:600;
+  }
+  .link-btn{
+    background:none; border:none; padding:0; cursor:pointer; color:var(--accent); font-weight:600;
+    font-size:13.5px; text-decoration:underline; text-underline-offset:2px;
+  }
+  .link-btn:hover{ color:var(--accent-strong); }
+
+  .tabs{ display:flex; gap:4px; margin-top:18px; border-bottom:1px solid var(--line); overflow-x:auto; }
+  .tab{
+    appearance:none; border:none; background:none; cursor:pointer; padding:10px 14px 12px; font-size:14px;
+    font-weight:600; color:var(--ink-faint); border-bottom:2px solid transparent; white-space:nowrap;
+    display:flex; align-items:center; gap:7px;
+  }
+  .tab.active{ color:var(--ink); border-bottom-color:var(--accent); }
+  .tab .count{ font-size:11px; background:var(--surface-2); color:var(--ink-soft); border-radius:99px; padding:1px 7px; font-weight:600; }
+  .tab.active .count{ background:var(--accent-soft); color:var(--accent-strong); }
+
+  .panel{ padding-top:20px; display:flex; flex-direction:column; gap:22px; }
+
+  .day-group{ display:flex; flex-direction:column; gap:10px; }
+  .day-heading{ font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); }
+  .shift-card{
+    background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px;
+    box-shadow:var(--shadow); display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  }
+  .shift-time{ font-size:13px; font-weight:600; color:var(--ink-soft); white-space:nowrap; min-width:118px; }
+  .shift-main{ flex:1 1 200px; min-width:160px; display:flex; flex-direction:column; gap:3px; }
+  .shift-role{ font-size:15px; font-weight:600; }
+  .shift-sub{ font-size:12.5px; color:var(--ink-faint); }
+  .shift-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+
+  .badge{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:3px 9px; border-radius:99px; white-space:nowrap; }
+  .badge.assigned{ background:var(--accent-soft); color:var(--accent-strong); }
+  .badge.open{ background:var(--open-soft); color:var(--open); }
+  .badge.flagged{ background:var(--flagged-soft); color:var(--flagged); }
+
+  .btn{
+    appearance:none; cursor:pointer; border-radius:9px; border:1px solid var(--line); background:var(--surface);
+    color:var(--ink); font-size:13.5px; font-weight:600; padding:8px 13px; display:inline-flex; align-items:center; gap:6px;
+  }
+  .btn:hover{ border-color:var(--ink-faint); }
+  .btn.primary{ background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+  .btn.primary:hover{ background:var(--accent-strong); border-color:var(--accent-strong); }
+  .btn.warn{ background:var(--flagged-soft); border-color:var(--flagged-soft); color:var(--flagged); }
+  .btn.danger{ background:var(--danger-soft); border-color:var(--danger-soft); color:var(--danger); }
+  .btn.ghost{ background:none; border-color:transparent; padding:8px 6px; }
+  .btn:disabled{ opacity:.5; cursor:default; }
+  .btn.sm{ padding:6px 10px; font-size:12.5px; }
+
+  .empty{
+    border:1px dashed var(--line); border-radius:14px; padding:34px 20px; text-align:center; color:var(--ink-faint);
+    font-size:14px; display:flex; flex-direction:column; gap:6px; align-items:center;
+  }
+  .empty .big{ font-size:26px; }
+
+  .card{ background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:20px; box-shadow:var(--shadow); }
+  .card h2{ font-size:17px; font-weight:600; margin-bottom:4px; }
+  .card .hint{ font-size:13px; color:var(--ink-faint); margin-bottom:14px; }
+  .form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .field{ display:flex; flex-direction:column; gap:5px; }
+  .field.full{ grid-column:1/-1; }
+  .field label{ font-size:12px; font-weight:600; color:var(--ink-soft); }
+  .field input, .field select, .field textarea{
+    font-family:inherit; font-size:14px; padding:9px 10px; border-radius:8px; border:1px solid var(--line);
+    background:var(--paper); color:var(--ink);
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  .form-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
+
+  .roster-list{ display:flex; flex-wrap:wrap; gap:8px; }
+  .roster-chip{
+    display:flex; align-items:center; gap:7px; background:var(--surface-2); border-radius:99px;
+    padding:6px 8px 6px 13px; font-size:13.5px; font-weight:600;
+  }
+  .roster-chip button{
+    appearance:none; border:none; background:var(--line); color:var(--ink-soft); width:18px; height:18px;
+    border-radius:99px; cursor:pointer; font-size:11px; line-height:1; display:flex; align-items:center; justify-content:center;
+  }
+
+  .filter-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .chip-filter{
+    appearance:none; cursor:pointer; border:1px solid var(--line); background:var(--surface); border-radius:99px;
+    padding:6px 12px; font-size:13px; font-weight:600; color:var(--ink-soft);
+  }
+  .chip-filter.active{ background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+
+  .center-screen{ min-height:calc(100vh - 40px); display:flex; align-items:center; justify-content:center; padding:20px; }
+  .id-card{ background:var(--surface); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow); padding:32px 28px; max-width:420px; width:100%; }
+  .id-card h1{ font-size:26px; margin-bottom:6px; }
+  .id-card .hint{ font-size:14px; color:var(--ink-soft); margin-bottom:20px; }
+  .name-grid{ display:flex; flex-direction:column; gap:8px; }
+  .name-btn{
+    text-align:left; padding:13px 16px; border-radius:11px; border:1px solid var(--line); background:var(--paper);
+    font-size:15px; font-weight:600; cursor:pointer; color:var(--ink); display:flex; align-items:center; justify-content:space-between;
+  }
+  .name-btn:hover{ border-color:var(--accent); background:var(--accent-soft); }
+  .divider{ display:flex; align-items:center; gap:10px; margin:18px 0; color:var(--ink-faint); font-size:12px; }
+  .divider::before, .divider::after{ content:""; flex:1; height:1px; background:var(--line); }
+  .passcode-row{ display:flex; gap:8px; }
+  .passcode-row input{ flex:1; }
+  .error-text{ color:var(--danger); font-size:13px; margin-top:6px; }
+
+  .toast{
+    position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(10px); background:var(--ink);
+    color:var(--paper); padding:11px 18px; border-radius:11px; font-size:13.5px; font-weight:600; box-shadow:var(--shadow);
+    opacity:0; pointer-events:none; transition:opacity .18s ease, transform .18s ease; z-index:40; max-width:88vw; text-align:center;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  /* In-app confirmation — used instead of the browser's native confirm(),
+     which some embedded/webview contexts silently suppress. */
+  .confirm-overlay{
+    position:fixed; inset:0; background:rgba(10,16,13,0.45); z-index:50;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .confirm-overlay[hidden]{ display:none; }
+  .confirm-card{
+    background:var(--surface); border:1px solid var(--line); border-radius:16px;
+    padding:22px; box-shadow:var(--shadow); max-width:360px; width:100%;
+  }
+  .confirm-card p{ margin:0 0 18px; font-size:14.5px; color:var(--ink); line-height:1.45; }
+  .confirm-actions{ display:flex; justify-content:flex-end; gap:8px; }
+
+  @media (max-width:520px){ .form-grid{ grid-template-columns:1fr; } .shift-time{ min-width:0; } }
+  @media (prefers-reduced-motion: reduce){ .toast{ transition:none; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div class="toast" id="toast"></div>
+<div class="confirm-overlay" id="confirmOverlay" hidden>
+  <div class="confirm-card">
+    <p id="confirmMessage"></p>
+    <div class="confirm-actions">
+      <button class="btn ghost" id="confirmCancel">Cancel</button>
+      <button class="btn danger" id="confirmYes">Delete</button>
+    </div>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
