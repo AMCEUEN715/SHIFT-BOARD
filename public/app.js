@@ -4,6 +4,23 @@
   // ---------------- utilities ----------------
   function pad(n) { return n < 10 ? "0" + n : "" + n; }
   function todayISO() { var d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function addDays(iso, n) {
+    var p = iso.split("-").map(Number);
+    var d = new Date(p[0], p[1] - 1, p[2]);
+    d.setDate(d.getDate() + n);
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+  }
+  function shiftMonth(ym, delta) {
+    var p = ym.split("-").map(Number);
+    var d = new Date(p[0], p[1] - 1 + delta, 1);
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1);
+  }
+  function monthLabel(ym) {
+    var p = ym.split("-").map(Number);
+    var d = new Date(p[0], p[1] - 1, 1);
+    return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  }
+  function daysInMonth(year, month1based) { return new Date(year, month1based, 0).getDate(); }
   function fmtDate(iso) {
     var parts = iso.split("-").map(Number);
     var d = new Date(parts[0], parts[1] - 1, parts[2]);
@@ -136,7 +153,9 @@
     passcodeError: "",
     newShiftDraft: { date: todayISO(), start: "09:00", end: "17:00", role: "", assignedTo: "" },
     flagDraft: {},
+    duplicateDraft: {},
     editingShiftId: null,
+    calendarMonth: todayISO().slice(0, 7),
   };
 
   var root = document.getElementById("root");
@@ -257,7 +276,6 @@
     go.onclick = tryAdmin;
     input.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); tryAdmin(); } };
   }
-
   // ---------------- main app ----------------
   function shiftSort(a, b) {
     if (a.date !== b.date) return a.date < b.date ? -1 : 1;
@@ -281,6 +299,7 @@
       html += renderAdminTabs();
       html += '<div class="panel">';
       if (state.adminTab === "all") html += renderAdminAll(today);
+      else if (state.adminTab === "calendar") html += renderAdminCalendar();
       else if (state.adminTab === "new") html += renderAdminNew();
       else if (state.adminTab === "flagged") html += renderAdminFlagged();
       else if (state.adminTab === "roster") html += renderAdminRoster();
@@ -320,7 +339,7 @@
     function t(key, label, badge) {
       return '<button class="tab ' + (state.adminTab === key ? "active" : "") + '" data-atab="' + key + '">' + label + (badge != null ? ' <span class="count">' + badge + '</span>' : '') + '</button>';
     }
-    return '<div class="tabs">' + t("all", "All Shifts", state.shifts.length) + t("new", "New Shift") + t("flagged", "Flagged", flaggedCount) + t("roster", "Roster & Settings") + '</div>';
+    return '<div class="tabs">' + t("all", "All Shifts", state.shifts.length) + t("calendar", "Calendar") + t("new", "New Shift") + t("flagged", "Flagged", flaggedCount) + t("roster", "Roster & Settings") + '</div>';
   }
 
   function renderMyShifts(today) {
@@ -364,7 +383,6 @@
         }).join("") + '</div>';
     }).join("");
   }
-
   function renderAdminAll(today) {
     var employees = state.settings.employees || [];
     var list = state.shifts.slice();
@@ -397,7 +415,7 @@
   function renderAdminShiftRow(s, employees) {
     if (state.editingShiftId === s.id) return renderAdminEditForm(s, employees);
     var badge = s.status === "flagged" ? '<span class="badge flagged">Flagged</span>' : (s.assignedTo ? '<span class="badge assigned">Assigned</span>' : '<span class="badge open">Open</span>');
-    return '' +
+    var row = '' +
       '<div class="shift-card"><div class="shift-time mono">' + fmtRange(s.start, s.end) + '</div>' +
       '<div class="shift-main"><div class="shift-role">' + escapeHtml(s.role || "Shift") + '</div>' +
       '<div class="shift-sub">' + badge + ' ' + (s.assignedTo ? escapeHtml(s.assignedTo) : (s.status === "flagged" && s.flaggedBy ? 'was ' + escapeHtml(s.flaggedBy) + "'s" : '— unassigned —')) +
@@ -405,6 +423,31 @@
       '<div class="shift-actions"><button class="btn ghost sm" data-duplicate="' + s.id + '">Duplicate</button>' +
       '<button class="btn ghost sm" data-edit="' + s.id + '">Edit</button>' +
       '<button class="btn danger sm" data-delete="' + s.id + '">Delete</button></div></div>';
+    if (state.duplicateDraft.hasOwnProperty(s.id)) row += renderAdminDuplicatePanel(s);
+    return row;
+  }
+
+  function renderAdminDuplicatePanel(s) {
+    var dates = state.duplicateDraft[s.id] || [""];
+    var inputStyle = "flex:1;border-radius:8px;border:1px solid var(--line);padding:9px 10px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px;";
+    return '' +
+      '<div class="card" style="margin-top:-8px;">' +
+      '<div class="hint" style="margin-bottom:8px;">Create a copy of this shift on each date below.</div>' +
+      '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">' +
+      dates.map(function (d, i) {
+        return '' +
+          '<div style="display:flex;gap:8px;align-items:center;">' +
+          '<input type="date" data-dup-shift="' + s.id + '" data-dup-idx="' + i + '" value="' + escapeHtml(d) + '" style="' + inputStyle + '" />' +
+          (dates.length > 1 ? '<button class="btn ghost sm" data-dup-remove-shift="' + s.id + '" data-dup-remove-idx="' + i + '" type="button">✕</button>' : '') +
+          '</div>';
+      }).join("") +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">' +
+      '<button class="btn ghost sm" data-dup-add="' + s.id + '" type="button">+ Add another date</button>' +
+      '<div class="form-actions" style="margin:0;">' +
+      '<button class="btn ghost sm" data-dup-cancel="' + s.id + '">Cancel</button>' +
+      '<button class="btn primary sm" data-dup-confirm="' + s.id + '">Duplicate</button>' +
+      '</div></div></div>';
   }
 
   function renderAdminEditForm(s, employees) {
@@ -420,7 +463,6 @@
       '<div class="form-actions"><button class="btn ghost" data-edit-cancel="' + s.id + '">Cancel</button>' +
       '<button class="btn primary" data-edit-save="' + s.id + '">Save changes</button></div></div>';
   }
-
   function renderAdminNew() {
     var employees = state.settings.employees || [];
     var d = state.newShiftDraft;
@@ -496,7 +538,55 @@
       '<div class="hint" style="margin-top:6px;margin-bottom:0;">Share the code with them directly — whoever holds it has full admin access.</div>' +
       '</div>';
   }
+  // ---------------- calendar ----------------
+  function renderAdminCalendar() {
+    var ym = state.calendarMonth;
+    var p = ym.split("-").map(Number);
+    var year = p[0], month = p[1]; // month is 1-based
+    var firstWeekday = new Date(year, month - 1, 1).getDay(); // 0 = Sun
+    var totalDays = daysInMonth(year, month);
+    var today = todayISO();
 
+    var byDate = {};
+    state.shifts.forEach(function (s) { (byDate[s.date] = byDate[s.date] || []).push(s); });
+
+    var cells = "";
+    for (var i = 0; i < firstWeekday; i++) cells += '<div class="cal-cell cal-cell-empty"></div>';
+    for (var day = 1; day <= totalDays; day++) {
+      var iso = year + "-" + pad(month) + "-" + pad(day);
+      var dayShifts = (byDate[iso] || []).slice().sort(shiftSort);
+      var isToday = iso === today;
+      var visible = dayShifts.slice(0, 4);
+      cells += '' +
+        '<div class="cal-cell' + (isToday ? " cal-today" : "") + '">' +
+        '<div class="cal-daynum">' + day + '</div>' +
+        '<div class="cal-shifts">' +
+        visible.map(function (s) {
+          var cls = s.status === "flagged" ? "flagged" : (s.assignedTo ? "assigned" : "open");
+          var label = fmtTime(s.start) + " " + escapeHtml(s.role || "Shift") + (s.assignedTo ? " · " + escapeHtml(s.assignedTo) : "");
+          return '<div class="cal-chip cal-chip-' + cls + '" data-cal-shift="' + s.id + '" title="' + label + '">' + label + '</div>';
+        }).join("") +
+        (dayShifts.length > 4 ? '<div class="cal-more">+' + (dayShifts.length - 4) + ' more</div>' : '') +
+        '</div>' +
+        '<button class="cal-add" data-cal-add="' + iso + '" type="button" title="Add a shift on this day">+</button>' +
+        '</div>';
+    }
+    var totalCells = firstWeekday + totalDays;
+    var trailing = (7 - (totalCells % 7)) % 7;
+    for (var j = 0; j < trailing; j++) cells += '<div class="cal-cell cal-cell-empty"></div>';
+
+    return '' +
+      '<div class="cal-header">' +
+      '<button class="btn ghost sm" id="cal-prev" type="button">‹</button>' +
+      '<h2 class="cal-title">' + monthLabel(ym) + '</h2>' +
+      '<button class="btn ghost sm" id="cal-next" type="button">›</button>' +
+      '<button class="btn sm" id="cal-today-btn" type="button">Today</button>' +
+      '</div>' +
+      '<div class="cal-grid cal-weekdays">' +
+      ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(function (d) { return '<div class="cal-weekday">' + d + '</div>'; }).join("") +
+      '</div>' +
+      '<div class="cal-grid">' + cells + '</div>';
+  }
   // ---------------- bindings ----------------
   function bindApp() {
     var switchBtn = document.getElementById("switch-btn");
@@ -545,6 +635,15 @@
     });
   }
 
+  // Reads whatever is currently typed into a duplicate panel's date inputs
+  // back into state before the list is mutated (add/remove a row) or
+  // submitted, so in-progress edits aren't lost on the next render.
+  function syncDupInputs(shiftId) {
+    var inputs = document.querySelectorAll('[data-dup-shift="' + shiftId + '"]');
+    var vals = [];
+    Array.prototype.forEach.call(inputs, function (inp) { vals[parseInt(inp.dataset.dupIdx, 10)] = inp.value || ""; });
+    state.duplicateDraft[shiftId] = vals;
+  }
   function bindAdmin() {
     Array.prototype.forEach.call(document.querySelectorAll("[data-afilter]"), function (b) { b.onclick = function () { state.adminFilterStatus = b.dataset.afilter; render(); }; });
     var empFilter = document.getElementById("admin-emp-filter");
@@ -579,14 +678,47 @@
     });
     Array.prototype.forEach.call(document.querySelectorAll("[data-duplicate]"), function (b) {
       b.onclick = function () {
-        api("/api/shifts/" + b.dataset.duplicate + "/duplicate", { code: state.adminCode }).then(function (res) {
+        var id = b.dataset.duplicate;
+        var shift = state.shifts.filter(function (x) { return x.id === id; })[0];
+        state.duplicateDraft[id] = [shift ? addDays(shift.date, 7) : todayISO()];
+        render();
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-dup-cancel]"), function (b) {
+      b.onclick = function () { delete state.duplicateDraft[b.dataset.dupCancel]; render(); };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-dup-add]"), function (b) {
+      b.onclick = function () {
+        var id = b.dataset.dupAdd;
+        syncDupInputs(id);
+        state.duplicateDraft[id].push("");
+        render();
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-dup-remove-shift]"), function (b) {
+      b.onclick = function () {
+        var id = b.dataset.dupRemoveShift;
+        var idx = parseInt(b.dataset.dupRemoveIdx, 10);
+        syncDupInputs(id);
+        state.duplicateDraft[id].splice(idx, 1);
+        render();
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-dup-confirm]"), function (b) {
+      b.onclick = function () {
+        var id = b.dataset.dupConfirm;
+        syncDupInputs(id);
+        var seen = {};
+        var dates = (state.duplicateDraft[id] || []).map(function (d) { return (d || "").trim(); }).filter(function (d) {
+          if (!d || seen[d]) return false;
+          seen[d] = true;
+          return true;
+        });
+        if (dates.length === 0) { toast("Pick at least one date."); return; }
+        api("/api/shifts/" + id + "/duplicate", { code: state.adminCode, dates: dates }).then(function (res) {
           if (res.ok) {
-            toast("Shift duplicated — update the date or person on the copy below.");
-            // Clear filters and open the new copy straight into edit mode so
-            // the date/person can be adjusted right away.
-            state.adminFilterStatus = "all";
-            state.adminFilterEmployee = "";
-            state.editingShiftId = res.data.id;
+            delete state.duplicateDraft[id];
+            toast(dates.length === 1 ? "Shift duplicated." : "Duplicated to " + dates.length + " days.");
             refresh();
           } else if (!handleAuthFailure(res)) toast("Couldn't duplicate that shift. Try again.");
         });
@@ -655,7 +787,6 @@
         }, "Remove");
       };
     });
-
     var saveOwnCodeBtn = document.getElementById("save-own-code-btn");
     if (saveOwnCodeBtn) {
       saveOwnCodeBtn.onclick = function () {
@@ -695,8 +826,30 @@
         });
       };
     }
-  }
 
+    var calPrev = document.getElementById("cal-prev");
+    if (calPrev) calPrev.onclick = function () { state.calendarMonth = shiftMonth(state.calendarMonth, -1); render(); };
+    var calNext = document.getElementById("cal-next");
+    if (calNext) calNext.onclick = function () { state.calendarMonth = shiftMonth(state.calendarMonth, 1); render(); };
+    var calTodayBtn = document.getElementById("cal-today-btn");
+    if (calTodayBtn) calTodayBtn.onclick = function () { state.calendarMonth = todayISO().slice(0, 7); render(); };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-cal-add]"), function (b) {
+      b.onclick = function () {
+        state.newShiftDraft = { date: b.dataset.calAdd, start: "09:00", end: "17:00", role: "", assignedTo: "" };
+        state.adminTab = "new";
+        render();
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-cal-shift]"), function (el) {
+      el.onclick = function () {
+        state.adminTab = "all";
+        state.adminFilterStatus = "all";
+        state.adminFilterEmployee = "";
+        state.editingShiftId = el.dataset.calShift;
+        render();
+      };
+    });
+  }
   // ---------------- data refresh / polling ----------------
   // A background poll must never blow away a form the admin (or an employee
   // flagging a shift) is still filling in — the New Shift / Edit shift forms
@@ -708,6 +861,7 @@
     if (state.editingShiftId) return true; // the "Edit shift" form is open
     if (state.identity && state.identity.type === "admin" && state.adminTab === "new") return true; // "New Shift" form is showing
     if (Object.keys(state.flagDraft).length > 0) return true; // a "flag unavailable" note is open
+    if (Object.keys(state.duplicateDraft).length > 0) return true; // a "duplicate to dates" panel is open
     return false;
   }
   function refresh(isPoll) {
