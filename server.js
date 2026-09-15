@@ -230,7 +230,6 @@ const server = http.createServer((req, res) => {
       await saveStore(store);
       return sendJson(res, 200, { admins: store.settings.admins.map((a) => ({ name: a.name, code: a.code })) });
     }
-
     // An admin can only ever rotate their OWN code (the one that authenticated
     // this request) — not anyone else's. To help someone who lost theirs,
     // remove and re-add them instead.
@@ -317,18 +316,25 @@ const server = http.createServer((req, res) => {
       if (action === "duplicate") {
         const admin = resolveAdmin(body);
         if (!admin) return sendJson(res, 403, { error: "bad_code" });
-        const newId = crypto.randomUUID();
-        store.shifts[newId] = {
-          date: shift.date, start: shift.start, end: shift.end, role: shift.role,
-          assignedTo: shift.assignedTo, status: shift.assignedTo ? "assigned" : "open",
-          flagNote: "", flaggedBy: "",
-          createdAt: Date.now(), updatedAt: Date.now(), lastEditedBy: admin.name,
-        };
+        // `dates`: create one copy per date given (lets an admin duplicate a
+        // shift onto several days at once). Falls back to the original
+        // shift's own date when no dates are given, for older callers.
+        const dates = Array.isArray(body.dates) ? body.dates.map(String).filter(Boolean) : [];
+        const targetDates = dates.length ? dates : [shift.date];
+        const ids = targetDates.map((date) => {
+          const newId = crypto.randomUUID();
+          store.shifts[newId] = {
+            date, start: shift.start, end: shift.end, role: shift.role,
+            assignedTo: shift.assignedTo, status: shift.assignedTo ? "assigned" : "open",
+            flagNote: "", flaggedBy: "",
+            createdAt: Date.now(), updatedAt: Date.now(), lastEditedBy: admin.name,
+          };
+          return newId;
+        });
         await saveStore(store);
-        return sendJson(res, 200, { id: newId });
+        return sendJson(res, 200, { id: ids[0], ids });
       }
     }
-
     if (pathname === "/api/roster/add") {
       const admin = resolveAdmin(body);
       if (!admin) return sendJson(res, 403, { error: "bad_code" });
