@@ -121,7 +121,6 @@
   function apiGet(path) {
     return fetch(path).then(function (r) { return r.json(); });
   }
-
   // Shared failure handler for admin-authenticated calls. If the server says
   // the code is no longer valid — it was changed, or that admin was removed
   // — sign this device out of admin back to the picker instead of leaving
@@ -154,6 +153,7 @@
     newShiftDraft: { date: todayISO(), start: "09:00", end: "17:00", role: "", assignedTo: "" },
     flagDraft: {},
     duplicateDraft: {},
+    dayDuplicateDraft: {},
     editingShiftId: null,
     calendarMonth: todayISO().slice(0, 7),
     expandedDays: {},
@@ -229,7 +229,6 @@
       });
     };
   }
-
   // ---------------- identity picker ----------------
   function renderIdentityPicker() {
     var employees = state.settings.employees || [];
@@ -354,7 +353,6 @@
       '<button class="tab ' + (state.tab === "open" ? "active" : "") + '" data-tab="open">Open Shifts <span class="count">' + open + '</span></button>' +
       '</div>';
   }
-
   function renderAdminTabs() {
     var flaggedCount = state.shifts.filter(function (s) { return s.status === "flagged"; }).length;
     function t(key, label, badge) {
@@ -433,13 +431,16 @@
   function renderAdminDayGroup(g, today, employees) {
     var expanded = isDayExpanded(g.date);
     var label = fmtDate(g.date) + (g.date < today ? ' · past' : '');
-    var header = '' +
+    var toggleBtn = '' +
       '<button class="day-toggle" data-day-toggle="' + g.date + '" type="button">' +
       '<span class="toggle-caret">' + (expanded ? '▾' : '▸') + '</span>' +
       '<span class="day-heading">' + label + '</span>' +
       '<span class="day-count">' + g.items.length + '</span>' +
       '</button>';
-    if (!expanded) return '<div class="day-group">' + header + '</div>';
+    var dupBtn = '<button class="btn ghost sm" data-day-duplicate="' + g.date + '" type="button">Duplicate day</button>';
+    var header = '<div class="day-row">' + toggleBtn + dupBtn + '</div>';
+    var dupPanel = state.dayDuplicateDraft.hasOwnProperty(g.date) ? renderDayDuplicatePanel(g.date, g.items.length) : '';
+    if (!expanded) return '<div class="day-group">' + header + dupPanel + '</div>';
     var timeGroups = groupByTime(g.items);
     var timesHtml = timeGroups.map(function (tg) {
       var timeKey = g.date + "|" + tg.time;
@@ -453,7 +454,32 @@
       var cardsHtml = timeExpanded ? tg.items.map(function (s) { return renderAdminShiftRow(s, employees); }).join("") : '';
       return '<div class="time-group">' + timeHeader + cardsHtml + '</div>';
     }).join("");
-    return '<div class="day-group">' + header + timesHtml + '</div>';
+    return '<div class="day-group">' + header + dupPanel + timesHtml + '</div>';
+  }
+  function renderDayDuplicatePanel(date, count) {
+    var dates = state.dayDuplicateDraft[date] || [addDays(date, 1)];
+    var inputStyle = "flex:1;border-radius:8px;border:1px solid var(--line);padding:9px 10px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px;";
+    return '' +
+      '<div class="card" style="margin-top:-4px;">' +
+      '<div class="hint" style="margin-bottom:8px;">Copy all ' + count + ' shift' + (count === 1 ? '' : 's') + ' from ' + fmtDate(date) + ' onto each date below.</div>' +
+      '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">' +
+      dates.map(function (d, i) {
+        return '' +
+          '<div style="display:flex;gap:8px;align-items:center;">' +
+          '<input type="date" data-ddup-date="' + date + '" data-ddup-idx="' + i + '" value="' + escapeHtml(d) + '" style="' + inputStyle + '" />' +
+          (dates.length > 1 ? '<button class="btn ghost sm" data-ddup-remove-date="' + date + '" data-ddup-remove-idx="' + i + '" type="button">✕</button>' : '') +
+          '</div>';
+      }).join("") +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+      '<button class="btn ghost sm" data-ddup-add="' + date + '" type="button">+ Add another date</button>' +
+      '<button class="btn ghost sm" data-ddup-week="' + date + '" type="button">+ Next 7 days</button>' +
+      '</div>' +
+      '<div class="form-actions" style="margin:0;">' +
+      '<button class="btn ghost sm" data-ddup-cancel="' + date + '">Cancel</button>' +
+      '<button class="btn primary sm" data-ddup-confirm="' + date + '">Duplicate day</button>' +
+      '</div></div></div>';
   }
 
   function renderAdminShiftRow(s, employees) {
@@ -470,7 +496,6 @@
     if (state.duplicateDraft.hasOwnProperty(s.id)) row += renderAdminDuplicatePanel(s);
     return row;
   }
-
   function renderAdminDuplicatePanel(s) {
     var dates = state.duplicateDraft[s.id] || [""];
     var inputStyle = "flex:1;border-radius:8px;border:1px solid var(--line);padding:9px 10px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px;";
@@ -541,7 +566,6 @@
         }).join("") + '</div>';
     }).join("");
   }
-
   function renderAdminRoster() {
     var employees = state.settings.employees || [];
     return '' +
@@ -647,7 +671,6 @@
     });
     if (state.identity.type === "admin") bindAdmin(); else bindEmployee();
   }
-
   function bindEmployee() {
     Array.prototype.forEach.call(document.querySelectorAll("[data-flag]"), function (b) { b.onclick = function () { state.flagDraft[b.dataset.flag] = ""; render(); }; });
     Array.prototype.forEach.call(document.querySelectorAll("[data-flag-cancel]"), function (b) { b.onclick = function () { delete state.flagDraft[b.dataset.flagCancel]; render(); }; });
@@ -672,7 +695,6 @@
       };
     });
   }
-
   function loadAdmins() {
     return api("/api/admins/list", { code: state.adminCode }).then(function (res) {
       if (res.ok) { state.admins = res.data.admins || []; render(); }
@@ -690,6 +712,13 @@
     state.duplicateDraft[shiftId] = vals;
   }
 
+  // Same idea as syncDupInputs, for the "duplicate whole day" panel's date inputs.
+  function syncDayDupInputs(date) {
+    var inputs = document.querySelectorAll('[data-ddup-date="' + date + '"]');
+    var vals = [];
+    Array.prototype.forEach.call(inputs, function (inp) { vals[parseInt(inp.dataset.ddupIdx, 10)] = inp.value || ""; });
+    state.dayDuplicateDraft[date] = vals;
+  }
   function bindAdmin() {
     Array.prototype.forEach.call(document.querySelectorAll("[data-day-toggle]"), function (b) {
       b.onclick = function () {
@@ -709,7 +738,7 @@
     var empFilter = document.getElementById("admin-emp-filter");
     if (empFilter) empFilter.onchange = function () { state.adminFilterEmployee = empFilter.value; render(); };
     Array.prototype.forEach.call(document.querySelectorAll("[data-edit]"), function (b) { b.onclick = function () { state.editingShiftId = b.dataset.edit; render(); }; });
-    Array.prototype.forEach.call(document.querySelectorAll("[data-edit-cancel]"), function (b) { b.onclick = function () { state.editingShiftId = null; render(); }; });
+    
     Array.prototype.forEach.call(document.querySelectorAll("[data-edit-save]"), function (b) {
       b.onclick = function () {
         var id = b.dataset.editSave;
@@ -736,6 +765,7 @@
         });
       };
     });
+Array.prototype.forEach.call(document.querySelectorAll("[data-edit-cancel]"), function (b) { b.onclick = function () { state.editingShiftId = null; render(); }; });
     Array.prototype.forEach.call(document.querySelectorAll("[data-duplicate]"), function (b) {
       b.onclick = function () {
         var id = b.dataset.duplicate;
@@ -784,6 +814,62 @@
         });
       };
     });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-day-duplicate]"), function (b) {
+      b.onclick = function () {
+        var date = b.dataset.dayDuplicate;
+        state.dayDuplicateDraft[date] = [addDays(date, 1)];
+        render();
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ddup-cancel]"), function (b) {
+      b.onclick = function () { delete state.dayDuplicateDraft[b.dataset.ddupCancel]; render(); };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ddup-add]"), function (b) {
+      b.onclick = function () {
+        var date = b.dataset.ddupAdd;
+        syncDayDupInputs(date);
+        state.dayDuplicateDraft[date].push("");
+        render();
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ddup-week]"), function (b) {
+      b.onclick = function () {
+        var date = b.dataset.ddupWeek;
+        var next7 = [];
+        for (var i = 1; i <= 7; i++) next7.push(addDays(date, i));
+        state.dayDuplicateDraft[date] = next7;
+        render();
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ddup-remove-date]"), function (b) {
+      b.onclick = function () {
+        var date = b.dataset.ddupRemoveDate;
+        var idx = parseInt(b.dataset.ddupRemoveIdx, 10);
+        syncDayDupInputs(date);
+        state.dayDuplicateDraft[date].splice(idx, 1);
+        render();
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ddup-confirm]"), function (b) {
+      b.onclick = function () {
+        var date = b.dataset.ddupConfirm;
+        syncDayDupInputs(date);
+        var seen = {};
+        var dates = (state.dayDuplicateDraft[date] || []).map(function (d) { return (d || "").trim(); }).filter(function (d) {
+          if (!d || seen[d]) return false;
+          seen[d] = true;
+          return true;
+        });
+        if (dates.length === 0) { toast("Pick at least one date."); return; }
+        api("/api/shifts/duplicate-day", { code: state.adminCode, sourceDate: date, dates: dates }).then(function (res) {
+          if (res.ok) {
+            delete state.dayDuplicateDraft[date];
+            toast("Copied " + res.data.count + " shift" + (res.data.count === 1 ? "" : "s") + " to " + dates.length + " day" + (dates.length === 1 ? "" : "s") + ".");
+            refresh();
+          } else if (!handleAuthFailure(res)) toast("Couldn't duplicate that day. Try again.");
+        });
+      };
+    });
     Array.prototype.forEach.call(document.querySelectorAll("[data-reassign]"), function (sel) {
       sel.onchange = function () {
         if (!sel.value) return;
@@ -814,7 +900,6 @@
       };
       document.getElementById("add-emp-name").onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); addEmpBtn.click(); } };
     }
-
     var genBtn = document.getElementById("gen-admin-code");
     if (genBtn) genBtn.onclick = function () { document.getElementById("new-admin-code").value = genCode(); };
     var addAdminBtn = document.getElementById("add-admin-btn");
@@ -886,7 +971,6 @@
         });
       };
     }
-
     var calPrev = document.getElementById("cal-prev");
     if (calPrev) calPrev.onclick = function () { state.calendarMonth = shiftMonth(state.calendarMonth, -1); render(); };
     var calNext = document.getElementById("cal-next");
@@ -937,6 +1021,7 @@
     if (state.identity && state.identity.type === "admin" && state.adminTab === "new") return true; // "New Shift" form is showing
     if (Object.keys(state.flagDraft).length > 0) return true; // a "flag unavailable" note is open
     if (Object.keys(state.duplicateDraft).length > 0) return true; // a "duplicate to dates" panel is open
+    if (Object.keys(state.dayDuplicateDraft).length > 0) return true; // a "duplicate whole day" panel is open
     return false;
   }
   function refresh(isPoll) {
