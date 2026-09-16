@@ -263,6 +263,36 @@ const server = http.createServer((req, res) => {
       return sendJson(res, 200, { id });
     }
 
+    // Duplicates every shift on one date onto one or more other dates in a
+    // single call — for a recurring day-to-day lineup, this avoids
+    // duplicating each shift on that day one at a time.
+    if (pathname === "/api/shifts/duplicate-day") {
+      const admin = resolveAdmin(body);
+      if (!admin) return sendJson(res, 403, { error: "bad_code" });
+      const sourceDate = (body.sourceDate || "").toString();
+      const dates = Array.isArray(body.dates) ? body.dates.map(String).filter(Boolean) : [];
+      if (!sourceDate || dates.length === 0) return sendJson(res, 400, { error: "missing_dates" });
+      const sourceShifts = Object.keys(store.shifts)
+        .map((id) => store.shifts[id])
+        .filter((shift) => shift.date === sourceDate);
+      if (sourceShifts.length === 0) return sendJson(res, 404, { error: "no_shifts_that_day" });
+      let count = 0;
+      dates.forEach((date) => {
+        sourceShifts.forEach((shift) => {
+          const newId = crypto.randomUUID();
+          store.shifts[newId] = {
+            date, start: shift.start, end: shift.end, role: shift.role,
+            assignedTo: shift.assignedTo, status: shift.assignedTo ? "assigned" : "open",
+            flagNote: "", flaggedBy: "",
+            createdAt: Date.now(), updatedAt: Date.now(), lastEditedBy: admin.name,
+          };
+          count++;
+        });
+      });
+      await saveStore(store);
+      return sendJson(res, 200, { count });
+    }
+
     const shiftMatch = pathname.match(/^\/api\/shifts\/([^/]+)\/(update|delete|claim|flag|duplicate)$/);
     if (shiftMatch) {
       const id = shiftMatch[1];
