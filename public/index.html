@@ -88,8 +88,9 @@
 
   .day-group{ display:flex; flex-direction:column; gap:10px; }
   .day-heading{ font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); }
+  .day-row{ display:flex; align-items:center; gap:8px; }
   .day-toggle{
-    appearance:none; border:none; background:none; cursor:pointer; padding:2px; width:100%;
+    appearance:none; border:none; background:none; cursor:pointer; padding:2px; flex:1; min-width:0;
     display:flex; align-items:center; gap:8px; text-align:left;
   }
   .day-toggle:hover .day-heading{ color:var(--ink-soft); }
@@ -202,7 +203,6 @@
   }
   .confirm-card p{ margin:0 0 18px; font-size:14.5px; color:var(--ink); line-height:1.45; }
   .confirm-actions{ display:flex; justify-content:flex-end; gap:8px; }
-
   /* Admin calendar tab */
   .cal-header{ display:flex; align-items:center; gap:10px; }
   .cal-title{ flex:1; font-size:18px; font-weight:600; text-align:center; }
