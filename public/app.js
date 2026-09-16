@@ -156,6 +156,9 @@
     duplicateDraft: {},
     editingShiftId: null,
     calendarMonth: todayISO().slice(0, 7),
+    expandedDays: {},
+    collapsedTimes: {},
+    calendarExpandedDays: {},
   };
 
   var root = document.getElementById("root");
@@ -170,7 +173,6 @@
     }
     root.innerHTML = renderApp(); bindApp();
   }
-
   function renderLoading() {
     return '<div class="center-screen"><div style="color:var(--ink-faint);font-size:14px;">Loading Shift Board…</div></div>';
   }
@@ -289,6 +291,25 @@
     });
     return groups;
   }
+  // Sub-groups an already date-sorted list of one day's shifts by start time.
+  function groupByTime(list) {
+    var groups = [], map = {};
+    list.forEach(function (s) {
+      var key = s.start || "";
+      if (!map[key]) { map[key] = { time: key, items: [] }; groups.push(map[key]); }
+      map[key].items.push(s);
+    });
+    return groups;
+  }
+  // Days default to expanded only for today; a day the admin has explicitly
+  // toggled remembers that choice regardless of date.
+  function isDayExpanded(date) {
+    if (state.expandedDays.hasOwnProperty(date)) return state.expandedDays[date];
+    return date === todayISO();
+  }
+  // Time sub-groups default to expanded (they're just visual organization
+  // within an already-opened day) unless explicitly collapsed.
+  function isTimeExpanded(key) { return !state.collapsedTimes[key]; }
 
   function renderApp() {
     var isAdmin = state.identity.type === "admin";
@@ -405,11 +426,34 @@
       '</select></div>';
     if (list.length === 0) return filters + '<div class="empty"><div class="big">🗂️</div>No shifts match this filter.</div>';
     var groups = groupByDate(list);
-    var body = groups.map(function (g) {
-      return '<div class="day-group"><div class="day-heading">' + fmtDate(g.date) + (g.date < today ? ' · past' : '') + '</div>' +
-        g.items.map(function (s) { return renderAdminShiftRow(s, employees); }).join("") + '</div>';
-    }).join("");
+    var body = groups.map(function (g) { return renderAdminDayGroup(g, today, employees); }).join("");
     return filters + body;
+  }
+
+  function renderAdminDayGroup(g, today, employees) {
+    var expanded = isDayExpanded(g.date);
+    var label = fmtDate(g.date) + (g.date < today ? ' · past' : '');
+    var header = '' +
+      '<button class="day-toggle" data-day-toggle="' + g.date + '" type="button">' +
+      '<span class="toggle-caret">' + (expanded ? '▾' : '▸') + '</span>' +
+      '<span class="day-heading">' + label + '</span>' +
+      '<span class="day-count">' + g.items.length + '</span>' +
+      '</button>';
+    if (!expanded) return '<div class="day-group">' + header + '</div>';
+    var timeGroups = groupByTime(g.items);
+    var timesHtml = timeGroups.map(function (tg) {
+      var timeKey = g.date + "|" + tg.time;
+      var timeExpanded = isTimeExpanded(timeKey);
+      var timeHeader = '' +
+        '<button class="time-toggle" data-time-toggle="' + timeKey + '" type="button">' +
+        '<span class="toggle-caret">' + (timeExpanded ? '▾' : '▸') + '</span>' +
+        '<span class="time-heading">' + fmtTime(tg.time) + '</span>' +
+        '<span class="day-count">' + tg.items.length + '</span>' +
+        '</button>';
+      var cardsHtml = timeExpanded ? tg.items.map(function (s) { return renderAdminShiftRow(s, employees); }).join("") : '';
+      return '<div class="time-group">' + timeHeader + cardsHtml + '</div>';
+    }).join("");
+    return '<div class="day-group">' + header + timesHtml + '</div>';
   }
 
   function renderAdminShiftRow(s, employees) {
@@ -556,7 +600,8 @@
       var iso = year + "-" + pad(month) + "-" + pad(day);
       var dayShifts = (byDate[iso] || []).slice().sort(shiftSort);
       var isToday = iso === today;
-      var visible = dayShifts.slice(0, 4);
+      var dayExpanded = !!state.calendarExpandedDays[iso];
+      var visible = dayExpanded ? dayShifts : dayShifts.slice(0, 4);
       cells += '' +
         '<div class="cal-cell' + (isToday ? " cal-today" : "") + '">' +
         '<div class="cal-daynum">' + day + '</div>' +
@@ -566,7 +611,7 @@
           var label = fmtTime(s.start) + " " + escapeHtml(s.role || "Shift") + (s.assignedTo ? " · " + escapeHtml(s.assignedTo) : "");
           return '<div class="cal-chip cal-chip-' + cls + '" data-cal-shift="' + s.id + '" title="' + label + '">' + label + '</div>';
         }).join("") +
-        (dayShifts.length > 4 ? '<div class="cal-more">+' + (dayShifts.length - 4) + ' more</div>' : '') +
+        (dayShifts.length > 4 ? '<button class="cal-more" data-cal-more="' + iso + '" type="button">' + (dayExpanded ? "Show less" : "+" + (dayShifts.length - 4) + " more") + '</button>' : '') +
         '</div>' +
         '<button class="cal-add" data-cal-add="' + iso + '" type="button" title="Add a shift on this day">+</button>' +
         '</div>';
@@ -644,7 +689,22 @@
     Array.prototype.forEach.call(inputs, function (inp) { vals[parseInt(inp.dataset.dupIdx, 10)] = inp.value || ""; });
     state.duplicateDraft[shiftId] = vals;
   }
+
   function bindAdmin() {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-day-toggle]"), function (b) {
+      b.onclick = function () {
+        var date = b.dataset.dayToggle;
+        state.expandedDays[date] = !isDayExpanded(date);
+        render();
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-time-toggle]"), function (b) {
+      b.onclick = function () {
+        var key = b.dataset.timeToggle;
+        state.collapsedTimes[key] = isTimeExpanded(key);
+        render();
+      };
+    });
     Array.prototype.forEach.call(document.querySelectorAll("[data-afilter]"), function (b) { b.onclick = function () { state.adminFilterStatus = b.dataset.afilter; render(); }; });
     var empFilter = document.getElementById("admin-emp-filter");
     if (empFilter) empFilter.onchange = function () { state.adminFilterEmployee = empFilter.value; render(); };
@@ -842,10 +902,25 @@
     });
     Array.prototype.forEach.call(document.querySelectorAll("[data-cal-shift]"), function (el) {
       el.onclick = function () {
+        var id = el.dataset.calShift;
+        var shift = state.shifts.filter(function (x) { return x.id === id; })[0];
         state.adminTab = "all";
         state.adminFilterStatus = "all";
         state.adminFilterEmployee = "";
-        state.editingShiftId = el.dataset.calShift;
+        state.editingShiftId = id;
+        // The shift's day (and time group) might default to collapsed —
+        // force both open so the edit form we're about to show is visible.
+        if (shift) {
+          state.expandedDays[shift.date] = true;
+          state.collapsedTimes[shift.date + "|" + shift.start] = false;
+        }
+        render();
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-cal-more]"), function (b) {
+      b.onclick = function () {
+        var iso = b.dataset.calMore;
+        state.calendarExpandedDays[iso] = !state.calendarExpandedDays[iso];
         render();
       };
     });
