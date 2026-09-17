@@ -32,7 +32,7 @@ const REDIS_KEY = "shiftboard:store";
 // client sees "ok".
 
 function defaultStore() {
-  return { settings: { exists: false, employees: [], admins: [] }, shifts: {} };
+  return { settings: { exists: false, employees: [], admins: [] }, shifts: {}, draft: { active: false, snapshot: null } };
 }
 
 function normalize(parsed) {
@@ -40,6 +40,12 @@ function normalize(parsed) {
   if (!parsed.settings) parsed.settings = defaultStore().settings;
   if (!Array.isArray(parsed.settings.admins)) parsed.settings.admins = [];
   if (!parsed.shifts) parsed.shifts = {};
+  // `draft`: while active, everyone except admins sees `snapshot` (the
+  // schedule as of when draft mode was turned on) instead of the live
+  // `shifts` admins are editing — so a half-finished batch of changes never
+  // shows up for staff mid-edit. Publishing clears it, so live becomes what
+  // everyone sees again.
+  if (!parsed.draft || typeof parsed.draft !== "object") parsed.draft = { active: false, snapshot: null };
   return parsed;
 }
 
@@ -122,8 +128,15 @@ function publicSettings() {
   return { exists: !!store.settings.exists, employees: store.settings.employees.slice() };
 }
 
-function shiftsArray() {
-  return Object.keys(store.shifts).map((id) => Object.assign({ id }, store.shifts[id]));
+function shiftsArray(source) {
+  return Object.keys(source).map((id) => Object.assign({ id }, source[id]));
+}
+
+// What an unauthenticated caller (an employee, or the admin-picker screen
+// before a code is entered) sees: the live schedule normally, or the frozen
+// pre-draft snapshot while an admin has unpublished changes in progress.
+function publishedShifts() {
+  return shiftsArray(store.draft.active ? store.draft.snapshot : store.shifts);
 }
 
 // Looks up which admin (if any) a request's code belongs to.
@@ -161,7 +174,6 @@ function serveStatic(req, res, pathname) {
     res.end(data);
   });
 }
-
 // ---------------- request handling ----------------
 
 const server = http.createServer((req, res) => {
@@ -175,12 +187,51 @@ const server = http.createServer((req, res) => {
 
   // ---- API routes ----
   if (pathname === "/api/state" && req.method === "GET") {
-    return sendJson(res, 200, { settings: publicSettings(), shifts: shiftsArray() });
+    return sendJson(res, 200, { settings: publicSettings(), shifts: publishedShifts() });
   }
 
   if (req.method !== "POST") { return sendJson(res, 405, { error: "method_not_allowed" }); }
 
   readBody(req).then(async (body) => {
+    // The admin's own view always shows the live, still-being-edited
+    // schedule (never the frozen pre-draft snapshot everyone else sees).
+    if (pathname === "/api/admin/state") {
+      const admin = resolveAdmin(body);
+      if (!admin) return sendJson(res, 403, { error: "bad_code" });
+      return sendJson(res, 200, { settings: publicSettings(), shifts: shiftsArray(store.shifts), draft: { active: store.draft.active } });
+    }
+
+    // ---- draft mode: hide in-progress schedule changes from everyone but
+    // admins until explicitly published ----
+    if (pathname === "/api/draft/start") {
+      const admin = resolveAdmin(body);
+      if (!admin) return sendJson(res, 403, { error: "bad_code" });
+      if (!store.draft.active) {
+        store.draft = { active: true, snapshot: JSON.parse(JSON.stringify(store.shifts)) };
+        await saveStore(store);
+      }
+      return sendJson(res, 200, { active: true });
+    }
+
+    if (pathname === "/api/draft/publish") {
+      const admin = resolveAdmin(body);
+      if (!admin) return sendJson(res, 403, { error: "bad_code" });
+      store.draft = { active: false, snapshot: null };
+      await saveStore(store);
+      return sendJson(res, 200, { active: false });
+    }
+
+    if (pathname === "/api/draft/discard") {
+      const admin = resolveAdmin(body);
+      if (!admin) return sendJson(res, 403, { error: "bad_code" });
+      if (store.draft.active && store.draft.snapshot) {
+        store.shifts = store.draft.snapshot;
+      }
+      store.draft = { active: false, snapshot: null };
+      await saveStore(store);
+      return sendJson(res, 200, { active: false, discarded: true });
+    }
+
     // ---- setup (first run only) ----
     if (pathname === "/api/setup") {
       if (store.settings.exists) return sendJson(res, 409, { error: "already_set_up" });
@@ -198,7 +249,6 @@ const server = http.createServer((req, res) => {
       const admin = resolveAdmin(body);
       return sendJson(res, 200, admin ? { ok: true, name: admin.name } : { ok: false });
     }
-
     if (pathname === "/api/admins/list") {
       const admin = resolveAdmin(body);
       if (!admin) return sendJson(res, 403, { error: "bad_code" });
@@ -230,6 +280,7 @@ const server = http.createServer((req, res) => {
       await saveStore(store);
       return sendJson(res, 200, { admins: store.settings.admins.map((a) => ({ name: a.name, code: a.code })) });
     }
+
     // An admin can only ever rotate their OWN code (the one that authenticated
     // this request) — not anyone else's. To help someone who lost theirs,
     // remove and re-add them instead.
@@ -243,7 +294,6 @@ const server = http.createServer((req, res) => {
       await saveStore(store);
       return sendJson(res, 200, { ok: true, name: admin.name });
     }
-
     if (pathname === "/api/shifts/create") {
       const admin = resolveAdmin(body);
       if (!admin) return sendJson(res, 403, { error: "bad_code" });
@@ -292,7 +342,6 @@ const server = http.createServer((req, res) => {
       await saveStore(store);
       return sendJson(res, 200, { count });
     }
-
     const shiftMatch = pathname.match(/^\/api\/shifts\/([^/]+)\/(update|delete|claim|flag|duplicate)$/);
     if (shiftMatch) {
       const id = shiftMatch[1];
@@ -330,7 +379,11 @@ const server = http.createServer((req, res) => {
         const name = (body.name || "").toString();
         if (!name || store.settings.employees.indexOf(name) === -1) return sendJson(res, 403, { error: "unknown_person" });
         if (shift.assignedTo) return sendJson(res, 409, { error: "already_claimed" });
-        Object.assign(shift, { assignedTo: name, status: "assigned", flagNote: "", flaggedBy: "", updatedAt: Date.now() });
+        const claimFields = { assignedTo: name, status: "assigned", flagNote: "", flaggedBy: "", updatedAt: Date.now() };
+        Object.assign(shift, claimFields);
+        // An employee's own claim should show up for them right away even
+        // mid-draft, so patch the frozen snapshot too if this shift is in it.
+        if (store.draft.active && store.draft.snapshot[id]) Object.assign(store.draft.snapshot[id], claimFields);
         await saveStore(store);
         return sendJson(res, 200, { ok: true });
       }
@@ -338,7 +391,9 @@ const server = http.createServer((req, res) => {
       if (action === "flag") {
         const name = (body.name || "").toString();
         if (!name || shift.assignedTo !== name) return sendJson(res, 403, { error: "not_your_shift" });
-        Object.assign(shift, { assignedTo: "", status: "flagged", flaggedBy: name, flagNote: (body.note || "").toString(), updatedAt: Date.now() });
+        const flagFields = { assignedTo: "", status: "flagged", flaggedBy: name, flagNote: (body.note || "").toString(), updatedAt: Date.now() };
+        Object.assign(shift, flagFields);
+        if (store.draft.active && store.draft.snapshot[id]) Object.assign(store.draft.snapshot[id], flagFields);
         await saveStore(store);
         return sendJson(res, 200, { ok: true });
       }
