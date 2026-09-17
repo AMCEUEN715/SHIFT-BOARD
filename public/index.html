@@ -117,7 +117,6 @@
   .badge.assigned{ background:var(--accent-soft); color:var(--accent-strong); }
   .badge.open{ background:var(--open-soft); color:var(--open); }
   .badge.flagged{ background:var(--flagged-soft); color:var(--flagged); }
-
   .btn{
     appearance:none; cursor:pointer; border-radius:9px; border:1px solid var(--line); background:var(--surface);
     color:var(--ink); font-size:13.5px; font-weight:600; padding:8px 13px; display:inline-flex; align-items:center; gap:6px;
@@ -136,6 +135,7 @@
     font-size:14px; display:flex; flex-direction:column; gap:6px; align-items:center;
   }
   .empty .big{ font-size:26px; }
+
   .card{ background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:20px; box-shadow:var(--shadow); }
   .card h2{ font-size:17px; font-weight:600; margin-bottom:4px; }
   .card .hint{ font-size:13px; color:var(--ink-faint); margin-bottom:14px; }
@@ -166,7 +166,6 @@
     padding:6px 12px; font-size:13px; font-weight:600; color:var(--ink-soft);
   }
   .chip-filter.active{ background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
-
   .center-screen{ min-height:calc(100vh - 40px); display:flex; align-items:center; justify-content:center; padding:20px; }
   .id-card{ background:var(--surface); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow); padding:32px 28px; max-width:420px; width:100%; }
   .id-card h1{ font-size:26px; margin-bottom:6px; }
@@ -203,6 +202,13 @@
   }
   .confirm-card p{ margin:0 0 18px; font-size:14.5px; color:var(--ink); line-height:1.45; }
   .confirm-actions{ display:flex; justify-content:flex-end; gap:8px; }
+
+  .draft-banner{
+    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    background:var(--flagged-soft); border:1px solid var(--flagged); color:var(--flagged);
+    border-radius:12px; padding:12px 16px; margin-top:14px; font-size:13.5px; font-weight:600;
+  }
+  .draft-banner-actions{ display:flex; gap:8px; flex-wrap:wrap; }
   /* Admin calendar tab */
   .cal-header{ display:flex; align-items:center; gap:10px; }
   .cal-title{ flex:1; font-size:18px; font-weight:600; text-align:center; }
