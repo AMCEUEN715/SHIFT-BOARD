@@ -101,7 +101,6 @@
     for (var i = 0; i < 8; i++) out += chars[rnd[i] % chars.length];
     return out;
   }
-
   function api(path, body) {
     return fetch(path, {
       method: "POST",
@@ -121,6 +120,7 @@
   function apiGet(path) {
     return fetch(path).then(function (r) { return r.json(); });
   }
+
   // Shared failure handler for admin-authenticated calls. If the server says
   // the code is no longer valid — it was changed, or that admin was removed
   // — sign this device out of admin back to the picker instead of leaving
@@ -159,6 +159,7 @@
     expandedDays: {},
     collapsedTimes: {},
     calendarExpandedDays: {},
+    draftActive: false,
   };
 
   var root = document.getElementById("root");
@@ -315,6 +316,7 @@
     var today = todayISO();
     var html = '<div class="wrap">';
     html += renderTopbar(isAdmin);
+    if (isAdmin && state.draftActive) html += renderDraftBanner();
     if (isAdmin) {
       html += renderAdminTabs();
       html += '<div class="panel">';
@@ -341,6 +343,16 @@
     return '' +
       '<div class="topbar"><div class="brand"><span class="brand-mark">🗓️</span><h1>Shift Board</h1></div>' +
       '<div class="whoami">' + who + ' <button class="link-btn" id="switch-btn">Switch</button></div></div>';
+  }
+
+  function renderDraftBanner() {
+    return '' +
+      '<div class="draft-banner">' +
+      '<span>🔒 Draft mode — your team won\'t see these changes until you publish.</span>' +
+      '<div class="draft-banner-actions">' +
+      '<button class="btn ghost sm" id="draft-discard-btn" type="button">Discard draft</button>' +
+      '<button class="btn primary sm" id="draft-publish-btn" type="button">Publish changes</button>' +
+      '</div></div>';
   }
 
   function renderEmployeeTabs() {
@@ -576,6 +588,11 @@
       '<input id="add-emp-name" type="text" placeholder="Full name" style="flex:1;border-radius:8px;border:1px solid var(--line);padding:9px 10px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px;" />' +
       '<button class="btn" id="add-emp-btn">Add person</button></div></div>' +
       renderAdminsCard() +
+      '<div class="card"><h2>Draft mode</h2><div class="hint">Turn this on before making a batch of schedule changes — your team keeps seeing today\'s published schedule until you hit Publish.</div>' +
+      (state.draftActive
+        ? '<div class="hint" style="margin-bottom:0;color:var(--flagged);font-weight:600;">Draft mode is on — use the banner at the top to publish or discard.</div>'
+        : '<button class="btn primary" id="draft-start-btn" type="button">Start draft mode</button>') +
+      '</div>' +
       '<div class="card"><h2>Your admin code</h2><div class="hint">Only you use this one — changing it doesn\'t affect any other admin.</div>' +
       '<div style="display:flex;gap:8px;">' +
       '<input id="new-own-code" type="text" placeholder="Set a new code for yourself" style="flex:1;border-radius:8px;border:1px solid var(--line);padding:9px 10px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px;" />' +
@@ -583,7 +600,6 @@
       '<div class="card"><h2>This device</h2><div class="hint">Lock the admin panel on this device — you\'ll need your code again next time.</div>' +
       '<button class="btn danger" id="lock-admin-btn">Lock admin panel</button></div>';
   }
-
   function renderAdminsCard() {
     var admins = state.admins || [];
     var rows = admins.length ? admins.map(function (a) {
@@ -738,7 +754,7 @@
     var empFilter = document.getElementById("admin-emp-filter");
     if (empFilter) empFilter.onchange = function () { state.adminFilterEmployee = empFilter.value; render(); };
     Array.prototype.forEach.call(document.querySelectorAll("[data-edit]"), function (b) { b.onclick = function () { state.editingShiftId = b.dataset.edit; render(); }; });
-    
+    Array.prototype.forEach.call(document.querySelectorAll("[data-edit-cancel]"), function (b) { b.onclick = function () { state.editingShiftId = null; render(); }; });
     Array.prototype.forEach.call(document.querySelectorAll("[data-edit-save]"), function (b) {
       b.onclick = function () {
         var id = b.dataset.editSave;
@@ -765,7 +781,6 @@
         });
       };
     });
-Array.prototype.forEach.call(document.querySelectorAll("[data-edit-cancel]"), function (b) { b.onclick = function () { state.editingShiftId = null; render(); }; });
     Array.prototype.forEach.call(document.querySelectorAll("[data-duplicate]"), function (b) {
       b.onclick = function () {
         var id = b.dataset.duplicate;
@@ -951,6 +966,37 @@ Array.prototype.forEach.call(document.querySelectorAll("[data-edit-cancel]"), fu
     var lockBtn = document.getElementById("lock-admin-btn");
     if (lockBtn) lockBtn.onclick = function () { state.identity = null; saveIdentity(null); saveAdminCode(""); render(); };
 
+    var draftStartBtn = document.getElementById("draft-start-btn");
+    if (draftStartBtn) {
+      draftStartBtn.onclick = function () {
+        api("/api/draft/start", { code: state.adminCode }).then(function (res) {
+          if (res.ok) { state.draftActive = true; toast("Draft mode is on — your team won't see changes until you publish."); render(); }
+          else if (!handleAuthFailure(res)) toast("Couldn't start draft mode. Try again.");
+        });
+      };
+    }
+    var draftPublishBtn = document.getElementById("draft-publish-btn");
+    if (draftPublishBtn) {
+      draftPublishBtn.onclick = function () {
+        showConfirm("Publish all your draft changes? Your team will see the updated schedule immediately.", function () {
+          api("/api/draft/publish", { code: state.adminCode }).then(function (res) {
+            if (res.ok) { state.draftActive = false; toast("Published — your team can now see the updated schedule."); refresh(); }
+            else if (!handleAuthFailure(res)) toast("Couldn't publish. Try again.");
+          });
+        }, "Publish");
+      };
+    }
+    var draftDiscardBtn = document.getElementById("draft-discard-btn");
+    if (draftDiscardBtn) {
+      draftDiscardBtn.onclick = function () {
+        showConfirm("Discard all changes made since you started this draft? This can't be undone.", function () {
+          api("/api/draft/discard", { code: state.adminCode }).then(function (res) {
+            if (res.ok) { state.draftActive = false; toast("Draft discarded."); refresh(); }
+            else if (!handleAuthFailure(res)) toast("Couldn't discard. Try again.");
+          });
+        }, "Discard");
+      };
+    }
     var nsSubmit = document.getElementById("ns-submit");
     if (nsSubmit) {
       nsSubmit.onclick = function () {
@@ -971,6 +1017,7 @@ Array.prototype.forEach.call(document.querySelectorAll("[data-edit-cancel]"), fu
         });
       };
     }
+
     var calPrev = document.getElementById("cal-prev");
     if (calPrev) calPrev.onclick = function () { state.calendarMonth = shiftMonth(state.calendarMonth, -1); render(); };
     var calNext = document.getElementById("cal-next");
@@ -1025,9 +1072,21 @@ Array.prototype.forEach.call(document.querySelectorAll("[data-edit-cancel]"), fu
     return false;
   }
   function refresh(isPoll) {
-    return apiGet("/api/state").then(function (data) {
+    // Admins always fetch their own live, still-being-edited schedule; anyone
+    // else gets whatever's currently published (frozen mid-draft, live otherwise).
+    var isAdmin = state.identity && state.identity.type === "admin" && state.adminCode;
+    var req = isAdmin
+      ? api("/api/admin/state", { code: state.adminCode })
+      : apiGet("/api/state").then(function (data) { return { ok: true, data: data }; });
+    return req.then(function (res) {
+      if (!res.ok) {
+        if (isAdmin) handleAuthFailure(res);
+        throw new Error("state_fetch_failed");
+      }
+      var data = res.data;
       state.settings = data.settings || { exists: false, employees: [] };
       state.shifts = data.shifts || [];
+      state.draftActive = !!(data.draft && data.draft.active);
       state.loaded = true;
       // Data is stored either way, above — just skip the re-render (and
       // whatever it would wipe out) while a form is in use. The next
