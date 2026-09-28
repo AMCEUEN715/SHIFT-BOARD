@@ -281,7 +281,7 @@
   // ---------------- main app ----------------
   function shiftSort(a, b) {
     if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-    var as = a.start || "", bs = b.start || ""; if (as !== bs) return as < bs ? -1 : 1; var ar = (a.role || "").toLowerCase(), br = (b.role || "").toLowerCase(); if (ar !== br) return ar < br ? -1 : 1; return 0; || "") ? -1 : 1;
+    var as = a.start || "", bs = b.start || ""; if (as !== bs) return as < bs ? -1 : 1; var ar = (a.role || "").toLowerCase(), br = (b.role || "").toLowerCase(); if (ar !== br) return ar < br ? -1 : 1; return 0;
   }
 
   // Finds another shift already assigned to `name` on `date` whose time
