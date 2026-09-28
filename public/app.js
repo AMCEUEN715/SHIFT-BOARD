@@ -281,7 +281,37 @@
   // ---------------- main app ----------------
   function shiftSort(a, b) {
     if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-    var as = a.start || "", bs = b.start || ""; if (as !== bs) return as < bs ? -1 : 1; var ar = (a.role || "").toLowerCase(), br = (b.role || "").toLowerCase(); if (ar !== br) return ar < br ? -1 : 1; return 0;
+    return (a.start || "") < (b.start || "") ? -1 : 1;
+  }
+
+  // Finds another shift already assigned to `name` on `date` whose time
+  // range overlaps [start, end) — used to flag double-bookings when an
+  // admin assigns someone. `excludeId` skips the shift being edited itself.
+  function findConflict(name, date, start, end, excludeId) {
+    if (!name || !date || !start || !end) return null;
+    return state.shifts.filter(function (s) {
+      return s.id !== excludeId && s.assignedTo === name && s.date === date && start < s.end && s.start < end;
+    })[0] || null;
+  }
+
+  // Reads a date/start/end/assign field group by id, checks for a conflict,
+  // and shows or hides the paired warning element accordingly. Shared by the
+  // New Shift and Edit shift forms.
+  function checkConflictWarning(dateId, startId, endId, assignId, warnId, excludeId) {
+    var warnEl = document.getElementById(warnId);
+    var assignEl = document.getElementById(assignId);
+    if (!warnEl || !assignEl) return;
+    var name = assignEl.value;
+    var date = document.getElementById(dateId).value;
+    var start = document.getElementById(startId).value;
+    var end = document.getElementById(endId).value;
+    var conflict = findConflict(name, date, start, end, excludeId);
+    if (conflict) {
+      warnEl.textContent = "⚠️ " + name + " is already assigned to " + (conflict.role || "a shift") + " " + fmtRange(conflict.start, conflict.end) + " that day.";
+      warnEl.style.display = "block";
+    } else {
+      warnEl.style.display = "none";
+    }
   }
   function groupByDate(list) {
     var groups = [], map = {};
@@ -310,7 +340,6 @@
   // Time sub-groups default to expanded (they're just visual organization
   // within an already-opened day) unless explicitly collapsed.
   function isTimeExpanded(key) { return !state.collapsedTimes[key]; }
-
   function renderApp() {
     var isAdmin = state.identity.type === "admin";
     var today = todayISO();
@@ -541,6 +570,7 @@
       '<div class="field full"><label>Assigned to</label><select id="ed-assign"><option value="">— Leave open —</option>' +
       employees.map(function (n) { return '<option value="' + escapeHtml(n) + '" ' + (s.assignedTo === n ? "selected" : "") + '>' + escapeHtml(n) + '</option>'; }).join("") +
       '</select></div></div>' +
+      '<div id="ed-conflict" class="warn-text" style="display:none;"></div>' +
       '<div class="form-actions"><button class="btn ghost" data-edit-cancel="' + s.id + '">Cancel</button>' +
       '<button class="btn primary" data-edit-save="' + s.id + '">Save changes</button></div></div>';
   }
@@ -558,6 +588,7 @@
       '<div class="field full"><label>Assign to</label><select id="ns-assign"><option value="">— Leave open —</option>' +
       employees.map(function (n) { return '<option value="' + escapeHtml(n) + '" ' + (d.assignedTo === n ? "selected" : "") + '>' + escapeHtml(n) + '</option>'; }).join("") +
       '</select></div></div>' +
+      '<div id="ns-conflict" class="warn-text" style="display:none;"></div>' +
       '<div class="form-actions"><button class="btn primary" id="ns-submit">Post shift</button></div></div>';
   }
 
@@ -687,6 +718,7 @@
     });
     if (state.identity.type === "admin") bindAdmin(); else bindEmployee();
   }
+
   function bindEmployee() {
     Array.prototype.forEach.call(document.querySelectorAll("[data-flag]"), function (b) { b.onclick = function () { state.flagDraft[b.dataset.flag] = ""; render(); }; });
     Array.prototype.forEach.call(document.querySelectorAll("[data-flag-cancel]"), function (b) { b.onclick = function () { delete state.flagDraft[b.dataset.flagCancel]; render(); }; });
@@ -755,6 +787,15 @@
     if (empFilter) empFilter.onchange = function () { state.adminFilterEmployee = empFilter.value; render(); };
     Array.prototype.forEach.call(document.querySelectorAll("[data-edit]"), function (b) { b.onclick = function () { state.editingShiftId = b.dataset.edit; render(); }; });
     Array.prototype.forEach.call(document.querySelectorAll("[data-edit-cancel]"), function (b) { b.onclick = function () { state.editingShiftId = null; render(); }; });
+    if (state.editingShiftId && document.getElementById("ed-date")) {
+      var edId = state.editingShiftId;
+      var runEdCheck = function () { checkConflictWarning("ed-date", "ed-start", "ed-end", "ed-assign", "ed-conflict", edId); };
+      document.getElementById("ed-date").oninput = runEdCheck;
+      document.getElementById("ed-start").oninput = runEdCheck;
+      document.getElementById("ed-end").oninput = runEdCheck;
+      document.getElementById("ed-assign").onchange = runEdCheck;
+      runEdCheck();
+    }
     Array.prototype.forEach.call(document.querySelectorAll("[data-edit-save]"), function (b) {
       b.onclick = function () {
         var id = b.dataset.editSave;
@@ -888,9 +929,21 @@
     Array.prototype.forEach.call(document.querySelectorAll("[data-reassign]"), function (sel) {
       sel.onchange = function () {
         if (!sel.value) return;
-        api("/api/shifts/" + sel.dataset.reassign + "/update", { code: state.adminCode, assignedTo: sel.value }).then(function (res) {
-          if (res.ok) { toast("Reassigned to " + sel.value + "."); refresh(); } else if (!handleAuthFailure(res)) toast("Couldn't reassign. Try again.");
-        });
+        var id = sel.dataset.reassign;
+        var name = sel.value;
+        var shift = state.shifts.filter(function (x) { return x.id === id; })[0];
+        var conflict = shift ? findConflict(name, shift.date, shift.start, shift.end, id) : null;
+        function doReassign() {
+          api("/api/shifts/" + id + "/update", { code: state.adminCode, assignedTo: name }).then(function (res) {
+            if (res.ok) { toast("Reassigned to " + name + "."); refresh(); } else if (!handleAuthFailure(res)) toast("Couldn't reassign. Try again.");
+          });
+        }
+        if (conflict) {
+          sel.value = "";
+          showConfirm(name + " is already assigned to " + (conflict.role || "a shift") + " " + fmtRange(conflict.start, conflict.end) + " that day. Reassign anyway?", doReassign, "Reassign");
+        } else {
+          doReassign();
+        }
       };
     });
     Array.prototype.forEach.call(document.querySelectorAll("[data-remove-emp]"), function (b) {
@@ -997,6 +1050,14 @@
         }, "Discard");
       };
     }
+    if (document.getElementById("ns-date")) {
+      var runNsCheck = function () { checkConflictWarning("ns-date", "ns-start", "ns-end", "ns-assign", "ns-conflict", null); };
+      document.getElementById("ns-date").oninput = runNsCheck;
+      document.getElementById("ns-start").oninput = runNsCheck;
+      document.getElementById("ns-end").oninput = runNsCheck;
+      document.getElementById("ns-assign").onchange = runNsCheck;
+      runNsCheck();
+    }
     var nsSubmit = document.getElementById("ns-submit");
     if (nsSubmit) {
       nsSubmit.onclick = function () {
@@ -1017,7 +1078,6 @@
         });
       };
     }
-
     var calPrev = document.getElementById("cal-prev");
     if (calPrev) calPrev.onclick = function () { state.calendarMonth = shiftMonth(state.calendarMonth, -1); render(); };
     var calNext = document.getElementById("cal-next");
