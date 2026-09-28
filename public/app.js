@@ -158,7 +158,7 @@
     calendarMonth: todayISO().slice(0, 7),
     expandedDays: {},
     collapsedTimes: {},
-    calendarExpandedDays: {},
+    calendarExpandedDays: {}, pastExpanded: false,
     draftActive: false,
   };
 
@@ -465,11 +465,11 @@
       '</select></div>';
     if (list.length === 0) return filters + '<div class="empty"><div class="big">🗂️</div>No shifts match this filter.</div>';
     var groups = groupByDate(list);
-    var body = groups.map(function (g) { return renderAdminDayGroup(g, today, employees); }).join("");
+    var pastGroups = groups.filter(function (g) { return g.date < today; }); var restGroups = groups.filter(function (g) { return g.date >= today; }); var body = (pastGroups.length ? renderPastFolder(pastGroups, today, employees) : "") + restGroups.map(function (g) { return renderAdminDayGroup(g, today, employees); }).join("");
     return filters + body;
   }
 
-  function renderAdminDayGroup(g, today, employees) {
+  function renderPastFolder(pastGroups, today, employees) { var expanded = !!state.pastExpanded; var totalShifts = pastGroups.reduce(function (sum, g) { return sum + g.items.length; }, 0); var toggleBtn = '<button class="day-toggle" data-past-toggle="1" type="button"><span class="toggle-caret">' + (expanded ? '▾' : '▸') + '</span><span class="day-heading">Past (' + pastGroups.length + ' day' + (pastGroups.length === 1 ? '' : 's') + ')</span><span class="day-count">' + totalShifts + '</span></button>'; var header = '<div class="day-row">' + toggleBtn + '</div>'; if (!expanded) return '<div class="day-group">' + header + '</div>'; var inner = pastGroups.map(function (g) { return renderAdminDayGroup(g, today, employees); }).join(""); return '<div class="day-group">' + header + inner + '</div>'; } function renderAdminDayGroup(g, today, employees) {
     var expanded = isDayExpanded(g.date);
     var label = fmtDate(g.date) + (g.date < today ? ' · past' : '');
     var toggleBtn = '' +
@@ -768,7 +768,7 @@
     state.dayDuplicateDraft[date] = vals;
   }
   function bindAdmin() {
-    Array.prototype.forEach.call(document.querySelectorAll("[data-day-toggle]"), function (b) {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-past-toggle]"), function (b) { b.onclick = function () { state.pastExpanded = !state.pastExpanded; render(); }; }); Array.prototype.forEach.call(document.querySelectorAll("[data-day-toggle]"), function (b) {
       b.onclick = function () {
         var date = b.dataset.dayToggle;
         state.expandedDays[date] = !isDayExpanded(date);
