@@ -20,7 +20,7 @@
     var d = new Date(p[0], p[1] - 1, 1);
     return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
   }
-  function daysInMonth(year, month1based) { return new Date(year, month1based, 0).getDate(); }
+  function daysInMonth(year, month1based) { return new Date(year, month1based, 0).getDate(); } function weekStartISO(iso) { var p = iso.split("-").map(Number); var d = new Date(p[0], p[1] - 1, p[2]); d.setDate(d.getDate() - d.getDay()); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); } function fmtShortDate(iso) { var p = iso.split("-").map(Number); var d = new Date(p[0], p[1] - 1, p[2]); return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); } function shiftHours(s) { if (!s.start || !s.end) return 0; var sp = s.start.split(":").map(Number), ep = s.end.split(":").map(Number); var mins = (ep[0] * 60 + ep[1]) - (sp[0] * 60 + sp[1]); return mins > 0 ? mins / 60 : 0; } function computeWeeklyHours(weekStart) { var hours = {}; var end = addDays(weekStart, 7); state.shifts.forEach(function (s) { if (!s.assignedTo) return; if (s.date < weekStart || s.date >= end) return; hours[s.assignedTo] = (hours[s.assignedTo] || 0) + shiftHours(s); }); return hours; }
   function fmtDate(iso) {
     var parts = iso.split("-").map(Number);
     var d = new Date(parts[0], parts[1] - 1, parts[2]);
@@ -158,7 +158,7 @@
     calendarMonth: todayISO().slice(0, 7),
     expandedDays: {},
     collapsedTimes: {},
-    calendarExpandedDays: {}, pastExpanded: false,
+    calendarExpandedDays: {}, pastExpanded: false, hoursWeek: weekStartISO(todayISO()),
     draftActive: false,
   };
 
@@ -609,7 +609,7 @@
         }).join("") + '</div>';
     }).join("");
   }
-  function renderAdminRoster() {
+  function renderWeeklyHoursCard() { var weekStart = state.hoursWeek || weekStartISO(todayISO()); var hours = computeWeeklyHours(weekStart); var employees = (state.settings.employees || []).slice().sort(function (a, b) { return (hours[b] || 0) - (hours[a] || 0); }); var rows = employees.map(function (n) { var h = hours[n] || 0; return '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);"><span>' + escapeHtml(n) + '</span><span class="mono">' + (h ? h.toFixed(1) : "0") + ' hrs</span></div>'; }).join(""); return '' + '<div class="card"><h2>Weekly Hours</h2>' + '<div class="hint">Scheduled hours per person for the week shown below, based on assigned shifts.</div>' + '<div style="display:flex;align-items:center;justify-content:space-between;margin:10px 0;">' + '<button class="btn ghost sm" id="hours-week-prev" type="button">‹</button>' + '<div style="font-weight:600;">' + fmtShortDate(weekStart) + ' – ' + fmtShortDate(addDays(weekStart, 6)) + '</div>' + '<button class="btn ghost sm" id="hours-week-next" type="button">›</button>' + '</div>' + (employees.length ? rows : '<div class="hint">No one on the roster yet.</div>') + '<div style="margin-top:10px;"><button class="btn ghost sm" id="hours-week-today" type="button">This week</button></div>' + '</div>'; } function renderAdminRoster() {
     var employees = state.settings.employees || [];
     return '' +
       '<div class="card"><h2>Roster</h2><div class="hint">People who can appear in the name picker and be assigned shifts.</div>' +
@@ -618,7 +618,7 @@
       '</div><div style="display:flex;gap:8px;">' +
       '<input id="add-emp-name" type="text" placeholder="Full name" style="flex:1;border-radius:8px;border:1px solid var(--line);padding:9px 10px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px;" />' +
       '<button class="btn" id="add-emp-btn">Add person</button></div></div>' +
-      renderAdminsCard() +
+      renderWeeklyHoursCard() + renderAdminsCard() +
       '<div class="card"><h2>Draft mode</h2><div class="hint">Turn this on before making a batch of schedule changes — your team keeps seeing today\'s published schedule until you hit Publish.</div>' +
       (state.draftActive
         ? '<div class="hint" style="margin-bottom:0;color:var(--flagged);font-weight:600;">Draft mode is on — use the banner at the top to publish or discard.</div>'
@@ -1017,7 +1017,7 @@
       };
     }
     var lockBtn = document.getElementById("lock-admin-btn");
-    if (lockBtn) lockBtn.onclick = function () { state.identity = null; saveIdentity(null); saveAdminCode(""); render(); };
+    if (lockBtn) lockBtn.onclick = function () { state.identity = null; saveIdentity(null); saveAdminCode(""); render(); }; var hoursPrev = document.getElementById("hours-week-prev"); if (hoursPrev) hoursPrev.onclick = function () { state.hoursWeek = addDays(state.hoursWeek || weekStartISO(todayISO()), -7); render(); }; var hoursNext = document.getElementById("hours-week-next"); if (hoursNext) hoursNext.onclick = function () { state.hoursWeek = addDays(state.hoursWeek || weekStartISO(todayISO()), 7); render(); }; var hoursToday = document.getElementById("hours-week-today"); if (hoursToday) hoursToday.onclick = function () { state.hoursWeek = weekStartISO(todayISO()); render(); };
 
     var draftStartBtn = document.getElementById("draft-start-btn");
     if (draftStartBtn) {
