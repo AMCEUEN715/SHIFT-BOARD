@@ -450,14 +450,14 @@
       list = list.filter(function (s) {
         if (state.adminFilterStatus === "assigned") return !!s.assignedTo;
         if (state.adminFilterStatus === "open") return !s.assignedTo && s.status !== "flagged";
-        if (state.adminFilterStatus === "flagged") return s.status === "flagged";
+        if (state.adminFilterStatus === "claimed") return !!s.claimed; if (state.adminFilterStatus === "flagged") return s.status === "flagged";
         return true;
       });
     }
     if (state.adminFilterEmployee) list = list.filter(function (s) { return s.assignedTo === state.adminFilterEmployee; });
     var filters = '' +
       '<div class="filter-row">' +
-      ["all", "assigned", "open", "flagged"].map(function (k) {
+      ["all", "assigned", "open", "claimed", "flagged"].map(function (k) {
         return '<button class="chip-filter ' + (state.adminFilterStatus === k ? "active" : "") + '" data-afilter="' + k + '">' + k.charAt(0).toUpperCase() + k.slice(1) + '</button>';
       }).join("") +
       '<select id="admin-emp-filter" class="chip-filter" style="padding:6px 10px;"><option value="">Everyone</option>' +
@@ -530,7 +530,7 @@
       '<div class="shift-card"><div class="shift-time mono">' + fmtRange(s.start, s.end) + '</div>' +
       '<div class="shift-main"><div class="shift-role">' + escapeHtml(s.role || "Shift") + '</div>' +
       '<div class="shift-sub">' + badge + ' ' + (s.assignedTo ? escapeHtml(s.assignedTo) : (s.status === "flagged" && s.flaggedBy ? 'was ' + escapeHtml(s.flaggedBy) + "'s" : '— unassigned —')) +
-      (s.flagNote ? ' · "' + escapeHtml(s.flagNote) + '"' : '') + '</div></div>' +
+      (s.claimed ? ' <span style="color:var(--ink-faint);font-weight:500;">· claimed</span>' : '') + (s.flagNote ? ' · "' + escapeHtml(s.flagNote) + '"' : '') + '</div></div>' +
       '<div class="shift-actions"><button class="btn ghost sm" data-duplicate="' + s.id + '">Duplicate</button>' +
       '<button class="btn ghost sm" data-edit="' + s.id + '">Edit</button>' +
       '<button class="btn danger sm" data-delete="' + s.id + '">Delete</button></div></div>';
