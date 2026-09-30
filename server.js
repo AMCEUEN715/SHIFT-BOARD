@@ -357,7 +357,7 @@ const server = http.createServer((req, res) => {
           date: String(body.date || shift.date),
           start: String(body.start || shift.start),
           end: String(body.end || shift.end),
-          role: body.role != null ? String(body.role) : shift.role,
+          role: body.role != null ? String(body.role) : shift.role, claimed: false,
           assignedTo: assignedTo,
           status: assignedTo ? "assigned" : "open",
           flagNote: "", flaggedBy: "",
@@ -379,7 +379,7 @@ const server = http.createServer((req, res) => {
         const name = (body.name || "").toString();
         if (!name || store.settings.employees.indexOf(name) === -1) return sendJson(res, 403, { error: "unknown_person" });
         if (shift.assignedTo) return sendJson(res, 409, { error: "already_claimed" });
-        const claimFields = { assignedTo: name, status: "assigned", flagNote: "", flaggedBy: "", updatedAt: Date.now() };
+        const claimFields = { assignedTo: name, status: "assigned", flagNote: "", flaggedBy: "", claimed: true, updatedAt: Date.now() };
         Object.assign(shift, claimFields);
         // An employee's own claim should show up for them right away even
         // mid-draft, so patch the frozen snapshot too if this shift is in it.
@@ -391,7 +391,7 @@ const server = http.createServer((req, res) => {
       if (action === "flag") {
         const name = (body.name || "").toString();
         if (!name || shift.assignedTo !== name) return sendJson(res, 403, { error: "not_your_shift" });
-        const flagFields = { assignedTo: "", status: "flagged", flaggedBy: name, flagNote: (body.note || "").toString(), updatedAt: Date.now() };
+        const flagFields = { assignedTo: "", status: "flagged", flaggedBy: name, flagNote: (body.note || "").toString(), claimed: false, updatedAt: Date.now() };
         Object.assign(shift, flagFields);
         if (store.draft.active && store.draft.snapshot[id]) Object.assign(store.draft.snapshot[id], flagFields);
         await saveStore(store);
