@@ -24,6 +24,11 @@
   // ---------------- master list helpers ----------------
   var MASTER_LOOKAHEAD_DAYS = 7;
   var DOW_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+  // White Fleet entries live in the same store as regular shifts (marked fleet: "white")
+  // but get their own admin tab + calendar and a compact card on each person's schedule.
+  function isFleet(s) { return s.fleet === "white"; }
+  function shiftsFor(fleet) { return state.shifts.filter(function (s) { return fleet ? isFleet(s) : !isFleet(s); }); }
+  function currentFleet() { return state.adminTab === "fleet" ? "white" : ""; }
   function dowOf(iso) {
     var p = iso.split("-").map(Number);
     return new Date(p[0], p[1] - 1, p[2]).getDay();
@@ -46,7 +51,7 @@
       var date = addDays(today, i);
       if (m.skipDates.indexOf(date) !== -1) continue;
       var have = {};
-      state.shifts.forEach(function (s) { if (s.date === date) have[runKey(s.role, s.start)] = true; });
+      state.shifts.forEach(function (s) { if (s.date === date && !isFleet(s)) have[runKey(s.role, s.start)] = true; });
       var dow = dowOf(date);
       var missing = m.runs.filter(function (r) { return r.days.indexOf(dow) !== -1 && !have[runKey(r.role, r.start)]; }).sort(runSort);
       if (missing.length) out.push({ date: date, runs: missing });
@@ -191,7 +196,7 @@
     expandedDays: {},
     collapsedTimes: {},
     calendarExpandedDays: {}, pastExpanded: false, hoursWeek: weekStartISO(todayISO()),
-    master: { runs: [], skipDates: [] }, masterImportDate: "", missingExpanded: false,
+    master: { runs: [], skipDates: [] }, masterImportDate: "", missingExpanded: false, fleetTab: "list",
     draftActive: false,
   };
 
@@ -384,6 +389,7 @@
       html += '<div class="panel">';
       if (state.adminTab === "all") html += renderMissingBanner() + renderAdminAll(today);
       else if (state.adminTab === "master") html += renderAdminMaster();
+      else if (state.adminTab === "fleet") html += renderAdminFleet(today);
       else if (state.adminTab === "calendar") html += renderAdminCalendar();
       else if (state.adminTab === "new") html += renderAdminNew();
       else if (state.adminTab === "flagged") html += renderAdminFlagged();
@@ -421,7 +427,7 @@
   function renderEmployeeTabs() {
     var today = todayISO();
     var mine = state.shifts.filter(function (s) { return s.assignedTo === state.identity.name && s.date >= today; }).length;
-    var open = state.shifts.filter(function (s) { return !s.assignedTo && s.date >= today; }).length;
+    var open = state.shifts.filter(function (s) { return !s.assignedTo && s.date >= today && !isFleet(s); }).length;
     return '' +
       '<div class="tabs">' +
       '<button class="tab ' + (state.tab === "mine" ? "active" : "") + '" data-tab="mine">My Shifts <span class="count">' + mine + '</span></button>' +
@@ -433,15 +439,25 @@
     function t(key, label, badge) {
       return '<button class="tab ' + (state.adminTab === key ? "active" : "") + '" data-atab="' + key + '">' + label + (badge != null ? ' <span class="count">' + badge + '</span>' : '') + '</button>';
     }
-    return '<div class="tabs">' + t("all", "All Shifts", state.shifts.length) + t("calendar", "Calendar") + t("new", "New Shift") + t("master", "Master List") + t("flagged", "Flagged", flaggedCount) + t("roster", "Roster & Settings") + '</div>';
+    return '<div class="tabs">' + t("all", "All Shifts", shiftsFor("").length) + t("calendar", "Calendar") + t("new", "New Shift") + t("master", "Master List") + t("fleet", "White Fleet", shiftsFor("white").length) + t("flagged", "Flagged", flaggedCount) + t("roster", "Roster & Settings") + '</div>';
   }
 
   function renderMyShifts(today) {
     var mine = state.shifts.filter(function (s) { return s.assignedTo === state.identity.name && s.date >= today; });
     if (mine.length === 0) return '<div class="empty"><div class="big">📭</div>No upcoming shifts assigned to you yet.</div>';
     return groupByDate(mine).map(function (g) {
-      return '<div class="day-group"><div class="day-heading">' + fmtDate(g.date) + '</div>' + g.items.map(renderMyShiftCard).join("") + '</div>';
+      return '<div class="day-group"><div class="day-heading">' + fmtDate(g.date) + '</div>' + g.items.filter(function (s) { return !isFleet(s); }).map(renderMyShiftCard).join("") + renderMyFleetCard(g.items.filter(isFleet)) + '</div>';
     }).join("");
+  }
+  // All of one day's White Fleet entries for this person in a single compact card,
+  // so a long fleet list doesn't push their regular shifts off the screen.
+  function renderMyFleetCard(items) {
+    if (!items.length) return "";
+    return '<div class="shift-card" style="display:block;">' +
+      '<div class="shift-role" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">White Fleet <span class="day-count" style="margin-left:0;">' + items.length + '</span></div>' +
+      items.map(function (s) {
+        return '<div style="display:flex;gap:10px;padding:3px 0;font-size:13.5px;"><span class="mono" style="color:var(--ink-soft);white-space:nowrap;">' + fmtRange(s.start, s.end) + '</span><span>' + escapeHtml(s.role || "White Fleet") + '</span></div>';
+      }).join("") + '</div>';
   }
   function renderMyShiftCard(s) {
     var flagOpen = state.flagDraft.hasOwnProperty(s.id);
@@ -462,7 +478,7 @@
   }
 
   function renderOpenShifts(today) {
-    var open = state.shifts.filter(function (s) { return !s.assignedTo && s.date >= today; });
+    var open = state.shifts.filter(function (s) { return !s.assignedTo && s.date >= today && !isFleet(s); });
     if (open.length === 0) return '<div class="empty"><div class="big">✅</div>No open shifts right now.</div>';
     return groupByDate(open).map(function (g) {
       return '<div class="day-group"><div class="day-heading">' + fmtDate(g.date) + '</div>' +
@@ -477,9 +493,9 @@
         }).join("") + '</div>';
     }).join("");
   }
-  function renderAdminAll(today) {
+  function renderAdminAll(today, fleet) {
     var employees = state.settings.employees || [];
-    var list = state.shifts.slice();
+    var list = shiftsFor(fleet);
     if (state.adminFilterStatus !== "all") {
       list = list.filter(function (s) {
         if (state.adminFilterStatus === "assigned") return !!s.assignedTo;
@@ -608,12 +624,12 @@
       '<div class="form-actions"><button class="btn ghost" data-edit-cancel="' + s.id + '">Cancel</button>' +
       '<button class="btn primary" data-edit-save="' + s.id + '">Save changes</button></div></div>';
   }
-  function renderAdminNew() {
+  function renderAdminNew(fleet) {
     var employees = state.settings.employees || [];
     var d = state.newShiftDraft;
     return '' +
-      '<div class="card"><h2>Post a new shift</h2>' +
-      '<div class="hint">Assign it to someone directly, or leave it open for anyone to claim.</div>' +
+      '<div class="card"><h2>' + (fleet ? 'New White Fleet entry' : 'Post a new shift') + '</h2>' +
+      '<div class="hint">' + (fleet ? 'Assign it to someone from the roster — it shows on their schedule.' : 'Assign it to someone directly, or leave it open for anyone to claim.') + '</div>' +
       '<div class="form-grid">' +
       '<div class="field"><label>Date</label><input type="date" id="ns-date" value="' + d.date + '" /></div>' +
       '<div class="field"><label>Role / label</label><input type="text" id="ns-role" placeholder="e.g. Front desk" value="' + escapeHtml(d.role) + '" /></div>' +
@@ -637,7 +653,7 @@
   function importMasterFromDay(date) {
     var seen = {}, added = 0;
     state.master.runs.forEach(function (r) { seen[runKey(r.role, r.start)] = true; });
-    state.shifts.filter(function (s) { return s.date === date; }).forEach(function (s) {
+    state.shifts.filter(function (s) { return s.date === date && !isFleet(s); }).forEach(function (s) {
       var role = (s.role || "").trim();
       if (!role || !s.start || !s.end || seen[runKey(role, s.start)]) return;
       seen[runKey(role, s.start)] = true;
@@ -704,6 +720,16 @@
       '<div style="margin-top:12px;"><button class="btn primary" id="master-add-btn" type="button">+ Add run</button></div></div>' +
       skipCard;
   }
+  // ---------------- white fleet ----------------
+  function renderAdminFleet(today) {
+    var tabs = [["list", "List"], ["calendar", "Calendar"], ["new", "New entry"]].map(function (t) {
+      return '<button class="chip-filter ' + (state.fleetTab === t[0] ? "active" : "") + '" type="button" data-ftab="' + t[0] + '">' + t[1] + '</button>';
+    }).join("");
+    var body = state.fleetTab === "calendar" ? renderAdminCalendar("white") : (state.fleetTab === "new" ? renderAdminNew("white") : renderAdminAll(today, "white"));
+    return '<div class="card"><h2>White Fleet</h2>' +
+      '<div class="hint">A separate schedule from the main shifts, using the same roster. Each person sees theirs as one compact card per day.</div>' +
+      '<div class="filter-row" style="margin:0;">' + tabs + '</div></div>' + body;
+  }
   function renderAdminFlagged() {
     var flagged = state.shifts.filter(function (s) { return s.status === "flagged"; });
     if (flagged.length === 0) return '<div class="empty"><div class="big">👍</div>Nothing flagged — all clear.</div>';
@@ -766,7 +792,7 @@
       '</div>';
   }
   // ---------------- calendar ----------------
-  function renderAdminCalendar() {
+  function renderAdminCalendar(fleet) {
     var ym = state.calendarMonth;
     var p = ym.split("-").map(Number);
     var year = p[0], month = p[1]; // month is 1-based
@@ -775,7 +801,7 @@
     var today = todayISO();
 
     var byDate = {};
-    state.shifts.forEach(function (s) { (byDate[s.date] = byDate[s.date] || []).push(s); });
+    shiftsFor(fleet).forEach(function (s) { (byDate[s.date] = byDate[s.date] || []).push(s); });
 
     var cells = "";
     for (var i = 0; i < firstWeekday; i++) cells += '<div class="cal-cell cal-cell-empty"></div>';
@@ -1029,7 +1055,7 @@
           return true;
         });
         if (dates.length === 0) { toast("Pick at least one date."); return; }
-        api("/api/shifts/duplicate-day", { code: state.adminCode, sourceDate: date, dates: dates }).then(function (res) {
+        api("/api/shifts/duplicate-day", { code: state.adminCode, sourceDate: date, dates: dates, fleet: currentFleet() }).then(function (res) {
           if (res.ok) {
             delete state.dayDuplicateDraft[date];
             toast("Copied " + res.data.count + " shift" + (res.data.count === 1 ? "" : "s") + " to " + dates.length + " day" + (dates.length === 1 ? "" : "s") + ".");
@@ -1131,6 +1157,9 @@
     var lockBtn = document.getElementById("lock-admin-btn");
     if (lockBtn) lockBtn.onclick = function () { state.identity = null; saveIdentity(null); saveAdminCode(""); render(); }; var hoursPrev = document.getElementById("hours-week-prev"); if (hoursPrev) hoursPrev.onclick = function () { state.hoursWeek = addDays(state.hoursWeek || weekStartISO(todayISO()), -7); render(); }; var hoursNext = document.getElementById("hours-week-next"); if (hoursNext) hoursNext.onclick = function () { state.hoursWeek = addDays(state.hoursWeek || weekStartISO(todayISO()), 7); render(); }; var hoursToday = document.getElementById("hours-week-today"); if (hoursToday) hoursToday.onclick = function () { state.hoursWeek = weekStartISO(todayISO()); render(); };
     function findMasterRun(id) { return state.master.runs.filter(function (r) { return r.id === id; })[0]; }
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ftab]"), function (b) {
+      b.onclick = function () { state.fleetTab = b.dataset.ftab; state.editingShiftId = null; render(); };
+    });
     var missingToggle = document.getElementById("missing-toggle");
     if (missingToggle) missingToggle.onclick = function () { state.missingExpanded = !state.missingExpanded; render(); };
     Array.prototype.forEach.call(document.querySelectorAll("[data-missing-skip]"), function (b) {
@@ -1146,7 +1175,7 @@
         var run = findMasterRun(parts[1]);
         if (!run) return;
         state.newShiftDraft = { date: parts[0], start: run.start, end: run.end, role: run.role, assignedTo: "" };
-        state.adminTab = "new";
+        if (state.adminTab === "fleet") state.fleetTab = "new"; else state.adminTab = "new";
         render();
       };
     });
@@ -1248,7 +1277,7 @@
           assignedTo: document.getElementById("ns-assign").value,
         };
         if (!d.date || !d.start || !d.end) { toast("Please fill in the date and times."); return; }
-        api("/api/shifts/create", Object.assign({ code: state.adminCode }, d)).then(function (res) {
+        api("/api/shifts/create", Object.assign({ code: state.adminCode, fleet: currentFleet() }, d)).then(function (res) {
           if (res.ok) {
             toast("Shift posted.");
             state.newShiftDraft = { date: d.date, start: "09:00", end: "17:00", role: "", assignedTo: "" };
@@ -1266,7 +1295,7 @@
     Array.prototype.forEach.call(document.querySelectorAll("[data-cal-add]"), function (b) {
       b.onclick = function () {
         state.newShiftDraft = { date: b.dataset.calAdd, start: "09:00", end: "17:00", role: "", assignedTo: "" };
-        state.adminTab = "new";
+        if (state.adminTab === "fleet") state.fleetTab = "new"; else state.adminTab = "new";
         render();
       };
     });
@@ -1282,6 +1311,8 @@
         // force both open so the edit form we're about to show is visible.
         if (shift) {
           state.expandedDays[shift.date] = true;
+          if (isFleet(shift)) { state.adminTab = "fleet"; state.fleetTab = "list"; }
+          if (shift.date < todayISO()) state.pastExpanded = true;
           state.collapsedTimes[shift.date + "|" + shift.start] = false;
         }
         render();
@@ -1304,7 +1335,7 @@
     var el = document.activeElement;
     if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT")) return true;
     if (state.editingShiftId) return true; // the "Edit shift" form is open
-    if (state.identity && state.identity.type === "admin" && state.adminTab === "new") return true; // "New Shift" form is showing
+    if (state.identity && state.identity.type === "admin" && (state.adminTab === "new" || (state.adminTab === "fleet" && state.fleetTab === "new"))) return true; // "New Shift" form is showing
     if (Object.keys(state.flagDraft).length > 0) return true; // a "flag unavailable" note is open
     if (Object.keys(state.duplicateDraft).length > 0) return true; // a "duplicate to dates" panel is open
     if (Object.keys(state.dayDuplicateDraft).length > 0) return true; // a "duplicate whole day" panel is open
