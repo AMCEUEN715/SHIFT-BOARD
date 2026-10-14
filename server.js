@@ -32,7 +32,7 @@ const REDIS_KEY = "shiftboard:store";
 // client sees "ok".
 
 function defaultStore() {
-  return { settings: { exists: false, employees: [], admins: [] }, shifts: {}, draft: { active: false, snapshot: null } };
+  return { settings: { exists: false, employees: [], admins: [] }, shifts: {}, draft: { active: false, snapshot: null }, master: { runs: [], skipDates: [] } };
 }
 
 function normalize(parsed) {
@@ -46,6 +46,9 @@ function normalize(parsed) {
   // shows up for staff mid-edit. Publishing clears it, so live becomes what
   // everyone sees again.
   if (!parsed.draft || typeof parsed.draft !== "object") parsed.draft = { active: false, snapshot: null };
+  if (!parsed.master || typeof parsed.master !== "object") parsed.master = { runs: [], skipDates: [] };
+  if (!Array.isArray(parsed.master.runs)) parsed.master.runs = [];
+  if (!Array.isArray(parsed.master.skipDates)) parsed.master.skipDates = [];
   return parsed;
 }
 
@@ -198,7 +201,28 @@ const server = http.createServer((req, res) => {
     if (pathname === "/api/admin/state") {
       const admin = resolveAdmin(body);
       if (!admin) return sendJson(res, 403, { error: "bad_code" });
-      return sendJson(res, 200, { settings: publicSettings(), shifts: shiftsArray(store.shifts), draft: { active: store.draft.active } });
+      return sendJson(res, 200, { settings: publicSettings(), shifts: shiftsArray(store.shifts), draft: { active: store.draft.active }, master: store.master });
+    }
+
+    // ---- master list: the standard daily runs. Only the admin UI reads it,
+    // to flag expected runs that haven't been entered for an upcoming day ----
+    if (pathname === "/api/master/save") {
+      const admin = resolveAdmin(body);
+      if (!admin) return sendJson(res, 403, { error: "bad_code" });
+      const runs = (Array.isArray(body.runs) ? body.runs : []).slice(0, 300)
+        .filter((r) => r && typeof r === "object")
+        .map((r) => ({
+          id: typeof r.id === "string" && r.id && r.id.length <= 40 ? r.id : crypto.randomUUID(),
+          role: String(r.role || "").trim().slice(0, 100),
+          start: /^\d{2}:\d{2}$/.test(r.start) ? r.start : "",
+          end: /^\d{2}:\d{2}$/.test(r.end) ? r.end : "",
+          days: Array.from(new Set((Array.isArray(r.days) ? r.days : []).map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))),
+        }))
+        .filter((r) => r.role && r.start && r.end);
+      const skipDates = (Array.isArray(body.skipDates) ? body.skipDates : []).map(String).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 500);
+      store.master = { runs, skipDates };
+      await saveStore(store);
+      return sendJson(res, 200, { master: store.master });
     }
 
     // ---- draft mode: hide in-progress schedule changes from everyone but
