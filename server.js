@@ -328,6 +328,7 @@ const server = http.createServer((req, res) => {
         start: String(body.start || ""),
         end: String(body.end || ""),
         role: String(body.role || ""),
+        fleet: body.fleet === "white" ? "white" : "",
         assignedTo: assignedTo,
         status: assignedTo ? "assigned" : "open",
         flagNote: "", flaggedBy: "",
@@ -348,14 +349,14 @@ const server = http.createServer((req, res) => {
       if (!sourceDate || dates.length === 0) return sendJson(res, 400, { error: "missing_dates" });
       const sourceShifts = Object.keys(store.shifts)
         .map((id) => store.shifts[id])
-        .filter((shift) => shift.date === sourceDate);
+        .filter((shift) => shift.date === sourceDate && (shift.fleet === "white") === (body.fleet === "white"));
       if (sourceShifts.length === 0) return sendJson(res, 404, { error: "no_shifts_that_day" });
       let count = 0;
       dates.forEach((date) => {
         sourceShifts.forEach((shift) => {
           const newId = crypto.randomUUID();
           store.shifts[newId] = {
-            date, start: shift.start, end: shift.end, role: shift.role,
+            date, start: shift.start, end: shift.end, role: shift.role, fleet: shift.fleet || "",
             assignedTo: shift.assignedTo, status: shift.assignedTo ? "assigned" : "open",
             flagNote: "", flaggedBy: "",
             createdAt: Date.now(), updatedAt: Date.now(), lastEditedBy: admin.name,
@@ -433,7 +434,7 @@ const server = http.createServer((req, res) => {
         const ids = targetDates.map((date) => {
           const newId = crypto.randomUUID();
           store.shifts[newId] = {
-            date, start: shift.start, end: shift.end, role: shift.role,
+            date, start: shift.start, end: shift.end, role: shift.role, fleet: shift.fleet || "",
             assignedTo: shift.assignedTo, status: shift.assignedTo ? "assigned" : "open",
             flagNote: "", flaggedBy: "",
             createdAt: Date.now(), updatedAt: Date.now(), lastEditedBy: admin.name,
