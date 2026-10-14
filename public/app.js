@@ -20,7 +20,39 @@
     var d = new Date(p[0], p[1] - 1, 1);
     return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
   }
-  function daysInMonth(year, month1based) { return new Date(year, month1based, 0).getDate(); } function weekStartISO(iso) { var p = iso.split("-").map(Number); var d = new Date(p[0], p[1] - 1, p[2]); d.setDate(d.getDate() - d.getDay()); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); } function fmtShortDate(iso) { var p = iso.split("-").map(Number); var d = new Date(p[0], p[1] - 1, p[2]); return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); } function shiftHours(s) { if (!s.start || !s.end) return 0; var sp = s.start.split(":").map(Number), ep = s.end.split(":").map(Number); var mins = (ep[0] * 60 + ep[1]) - (sp[0] * 60 + sp[1]); return mins > 0 ? mins / 60 : 0; } function computeWeeklyHours(weekStart) { var hours = {}; var end = addDays(weekStart, 7); state.shifts.forEach(function (s) { if (!s.assignedTo) return; if (s.date < weekStart || s.date >= end) return; hours[s.assignedTo] = (hours[s.assignedTo] || 0) + shiftHours(s); }); return hours; }
+  function daysInMonth(year, month1based) { return new Date(year, month1based, 0).getDate(); }
+  // ---------------- master list helpers ----------------
+  var MASTER_LOOKAHEAD_DAYS = 7;
+  var DOW_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+  function dowOf(iso) {
+    var p = iso.split("-").map(Number);
+    return new Date(p[0], p[1] - 1, p[2]).getDay();
+  }
+  function runKey(role, start) { return (role || "").trim().toLowerCase() + "|" + (start || ""); }
+  function runSort(a, b) {
+    if (a.start !== b.start) return a.start < b.start ? -1 : 1;
+    var ar = a.role.toLowerCase(), br = b.role.toLowerCase();
+    return ar === br ? 0 : (ar < br ? -1 : 1);
+  }
+  function newRunId() { return "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  // For today through the next MASTER_LOOKAHEAD_DAYS days: the master-list runs
+  // that apply that weekday but have no shift with the same name + start time.
+  function computeMissingRuns() {
+    var m = state.master;
+    if (!m || !m.runs.length) return [];
+    var out = [];
+    var today = todayISO();
+    for (var i = 0; i <= MASTER_LOOKAHEAD_DAYS; i++) {
+      var date = addDays(today, i);
+      if (m.skipDates.indexOf(date) !== -1) continue;
+      var have = {};
+      state.shifts.forEach(function (s) { if (s.date === date) have[runKey(s.role, s.start)] = true; });
+      var dow = dowOf(date);
+      var missing = m.runs.filter(function (r) { return r.days.indexOf(dow) !== -1 && !have[runKey(r.role, r.start)]; }).sort(runSort);
+      if (missing.length) out.push({ date: date, runs: missing });
+    }
+    return out;
+  } function weekStartISO(iso) { var p = iso.split("-").map(Number); var d = new Date(p[0], p[1] - 1, p[2]); d.setDate(d.getDate() - d.getDay()); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); } function fmtShortDate(iso) { var p = iso.split("-").map(Number); var d = new Date(p[0], p[1] - 1, p[2]); return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }); } function shiftHours(s) { if (!s.start || !s.end) return 0; var sp = s.start.split(":").map(Number), ep = s.end.split(":").map(Number); var mins = (ep[0] * 60 + ep[1]) - (sp[0] * 60 + sp[1]); return mins > 0 ? mins / 60 : 0; } function computeWeeklyHours(weekStart) { var hours = {}; var end = addDays(weekStart, 7); state.shifts.forEach(function (s) { if (!s.assignedTo) return; if (s.date < weekStart || s.date >= end) return; hours[s.assignedTo] = (hours[s.assignedTo] || 0) + shiftHours(s); }); return hours; }
   function fmtDate(iso) {
     var parts = iso.split("-").map(Number);
     var d = new Date(parts[0], parts[1] - 1, parts[2]);
@@ -159,6 +191,7 @@
     expandedDays: {},
     collapsedTimes: {},
     calendarExpandedDays: {}, pastExpanded: false, hoursWeek: weekStartISO(todayISO()),
+    master: { runs: [], skipDates: [] }, masterImportDate: "", missingExpanded: false,
     draftActive: false,
   };
 
@@ -349,7 +382,8 @@
     if (isAdmin) {
       html += renderAdminTabs();
       html += '<div class="panel">';
-      if (state.adminTab === "all") html += renderAdminAll(today);
+      if (state.adminTab === "all") html += renderMissingBanner() + renderAdminAll(today);
+      else if (state.adminTab === "master") html += renderAdminMaster();
       else if (state.adminTab === "calendar") html += renderAdminCalendar();
       else if (state.adminTab === "new") html += renderAdminNew();
       else if (state.adminTab === "flagged") html += renderAdminFlagged();
@@ -399,7 +433,7 @@
     function t(key, label, badge) {
       return '<button class="tab ' + (state.adminTab === key ? "active" : "") + '" data-atab="' + key + '">' + label + (badge != null ? ' <span class="count">' + badge + '</span>' : '') + '</button>';
     }
-    return '<div class="tabs">' + t("all", "All Shifts", state.shifts.length) + t("calendar", "Calendar") + t("new", "New Shift") + t("flagged", "Flagged", flaggedCount) + t("roster", "Roster & Settings") + '</div>';
+    return '<div class="tabs">' + t("all", "All Shifts", state.shifts.length) + t("calendar", "Calendar") + t("new", "New Shift") + t("master", "Master List") + t("flagged", "Flagged", flaggedCount) + t("roster", "Roster & Settings") + '</div>';
   }
 
   function renderMyShifts(today) {
@@ -592,6 +626,84 @@
       '<div class="form-actions"><button class="btn primary" id="ns-submit">Post shift</button></div></div>';
   }
 
+  // ---------------- master list ----------------
+  function saveMaster(rerender) {
+    return api("/api/master/save", { code: state.adminCode, runs: state.master.runs, skipDates: state.master.skipDates }).then(function (res) {
+      if (res.ok) state.master = res.data.master;
+      else if (!handleAuthFailure(res)) toast("Couldn't save the master list. Try again.");
+      if (rerender !== false) render();
+    });
+  }
+  function importMasterFromDay(date) {
+    var seen = {}, added = 0;
+    state.master.runs.forEach(function (r) { seen[runKey(r.role, r.start)] = true; });
+    state.shifts.filter(function (s) { return s.date === date; }).forEach(function (s) {
+      var role = (s.role || "").trim();
+      if (!role || !s.start || !s.end || seen[runKey(role, s.start)]) return;
+      seen[runKey(role, s.start)] = true;
+      state.master.runs.push({ id: newRunId(), role: role, start: s.start, end: s.end, days: [1, 2, 3, 4, 5] });
+      added++;
+    });
+    if (!added) { toast("Nothing new to import from that day."); return; }
+    toast("Added " + added + " run" + (added === 1 ? "" : "s") + " to the master list.");
+    saveMaster();
+  }
+  function renderMissingBanner() {
+    var missing = computeMissingRuns();
+    if (!missing.length) return "";
+    var total = missing.reduce(function (n, d) { return n + d.runs.length; }, 0);
+    var head = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">' +
+      '<span>⚠️ ' + total + ' expected run' + (total === 1 ? '' : 's') + ' not entered in the next ' + MASTER_LOOKAHEAD_DAYS + ' days</span>' +
+      '<button class="btn ghost sm" id="missing-toggle" type="button">' + (state.missingExpanded ? 'Hide' : 'Show') + '</button></div>';
+    var body = '';
+    if (state.missingExpanded) {
+      body = missing.map(function (d) {
+        return '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--flagged);">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;"><span>' + fmtDate(d.date) + ' · ' + d.runs.length + ' missing</span>' +
+          '<button class="btn ghost sm" type="button" data-missing-skip="' + d.date + '">No runs this day</button></div>' +
+          d.runs.map(function (r) {
+            return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0;font-weight:500;">' +
+              '<span><span class="mono">' + fmtRange(r.start, r.end) + '</span> ' + escapeHtml(r.role) + '</span>' +
+              '<button class="btn ghost sm" type="button" data-missing-add="' + d.date + '|' + r.id + '">Add</button></div>';
+          }).join("") + '</div>';
+      }).join("");
+    }
+    return '<div class="draft-banner" style="display:block;">' + head + body + '</div>';
+  }
+  function renderAdminMaster() {
+    var runs = state.master.runs.slice().sort(runSort);
+    var skips = state.master.skipDates.slice().sort();
+    var inputStyle = "border-radius:8px;border:1px solid var(--line);padding:8px 9px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px;";
+    var rows = runs.map(function (r) {
+      var days = DOW_LABELS.map(function (label, d) {
+        return '<button class="chip-filter ' + (r.days.indexOf(d) !== -1 ? "active" : "") + '" style="padding:4px 9px;" type="button" data-master-day="' + r.id + '|' + d + '">' + label + '</button>';
+      }).join("");
+      return '' +
+        '<div style="padding:10px 0;border-bottom:1px solid var(--line);">' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
+        '<input type="text" data-master-field="role" data-master-id="' + r.id + '" value="' + escapeHtml(r.role) + '" style="flex:2;min-width:120px;' + inputStyle + '" />' +
+        '<input type="time" data-master-field="start" data-master-id="' + r.id + '" value="' + r.start + '" style="flex:1;min-width:110px;' + inputStyle + '" />' +
+        '<input type="time" data-master-field="end" data-master-id="' + r.id + '" value="' + r.end + '" style="flex:1;min-width:110px;' + inputStyle + '" />' +
+        '</div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">' +
+        '<div style="display:flex;gap:4px;flex-wrap:wrap;">' + days + '</div>' +
+        '<button class="btn danger sm" type="button" data-master-delete="' + r.id + '">Remove</button>' +
+        '</div></div>';
+    }).join("");
+    var skipCard = skips.length ? '' +
+      '<div class="card"><h2>Days with no runs</h2><div class="hint">These days won\'t be flagged. Remove one to start checking it again.</div>' +
+      '<div class="roster-list">' + skips.map(function (d) { return '<div class="roster-chip">' + fmtDate(d) + '<button data-master-unskip="' + d + '">✕</button></div>'; }).join("") + '</div></div>' : '';
+    return '' +
+      '<div class="card"><h2>Master list</h2>' +
+      '<div class="hint">The standard runs you expect to enter. Pick the weekdays each one applies to — the All Shifts tab will flag any that aren\'t entered in the next ' + MASTER_LOOKAHEAD_DAYS + ' days (matched by name and start time).</div>' +
+      '<div class="hint" style="margin-bottom:6px;">Quick start: pick a typical day you\'ve already entered and import its runs.</div>' +
+      '<div style="display:flex;gap:8px;"><input type="date" id="master-import-date" value="' + (state.masterImportDate || todayISO()) + '" style="flex:1;' + inputStyle + '" />' +
+      '<button class="btn" id="master-import-btn" type="button">Import from this day</button></div></div>' +
+      '<div class="card"><h2>Runs (' + runs.length + ')</h2>' +
+      (rows || '<div class="hint">No runs yet — import a day above or add one.</div>') +
+      '<div style="margin-top:12px;"><button class="btn primary" id="master-add-btn" type="button">+ Add run</button></div></div>' +
+      skipCard;
+  }
   function renderAdminFlagged() {
     var flagged = state.shifts.filter(function (s) { return s.status === "flagged"; });
     if (flagged.length === 0) return '<div class="empty"><div class="big">👍</div>Nothing flagged — all clear.</div>';
@@ -1018,6 +1130,73 @@
     }
     var lockBtn = document.getElementById("lock-admin-btn");
     if (lockBtn) lockBtn.onclick = function () { state.identity = null; saveIdentity(null); saveAdminCode(""); render(); }; var hoursPrev = document.getElementById("hours-week-prev"); if (hoursPrev) hoursPrev.onclick = function () { state.hoursWeek = addDays(state.hoursWeek || weekStartISO(todayISO()), -7); render(); }; var hoursNext = document.getElementById("hours-week-next"); if (hoursNext) hoursNext.onclick = function () { state.hoursWeek = addDays(state.hoursWeek || weekStartISO(todayISO()), 7); render(); }; var hoursToday = document.getElementById("hours-week-today"); if (hoursToday) hoursToday.onclick = function () { state.hoursWeek = weekStartISO(todayISO()); render(); };
+    function findMasterRun(id) { return state.master.runs.filter(function (r) { return r.id === id; })[0]; }
+    var missingToggle = document.getElementById("missing-toggle");
+    if (missingToggle) missingToggle.onclick = function () { state.missingExpanded = !state.missingExpanded; render(); };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-missing-skip]"), function (b) {
+      b.onclick = function () {
+        state.master.skipDates.push(b.dataset.missingSkip);
+        toast("Marked as a day with no runs.");
+        saveMaster();
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-missing-add]"), function (b) {
+      b.onclick = function () {
+        var parts = b.dataset.missingAdd.split("|");
+        var run = findMasterRun(parts[1]);
+        if (!run) return;
+        state.newShiftDraft = { date: parts[0], start: run.start, end: run.end, role: run.role, assignedTo: "" };
+        state.adminTab = "new";
+        render();
+      };
+    });
+    var masterAddBtn = document.getElementById("master-add-btn");
+    if (masterAddBtn) masterAddBtn.onclick = function () {
+      state.master.runs.push({ id: newRunId(), role: "New run", start: "07:00", end: "07:30", days: [1, 2, 3, 4, 5] });
+      saveMaster();
+    };
+    var masterImportBtn = document.getElementById("master-import-btn");
+    if (masterImportBtn) masterImportBtn.onclick = function () {
+      var d = document.getElementById("master-import-date").value;
+      if (!d) { toast("Pick a day to import from."); return; }
+      state.masterImportDate = d;
+      importMasterFromDay(d);
+    };
+    Array.prototype.forEach.call(document.querySelectorAll("[data-master-field]"), function (inp) {
+      inp.onchange = function () {
+        var run = findMasterRun(inp.dataset.masterId);
+        if (!run) return;
+        var v = inp.value.trim();
+        if (!v) { toast(inp.dataset.masterField === "role" ? "Give the run a name." : "That time can't be blank."); render(); return; }
+        run[inp.dataset.masterField] = v;
+        saveMaster(false);
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-master-day]"), function (b) {
+      b.onclick = function () {
+        var parts = b.dataset.masterDay.split("|");
+        var run = findMasterRun(parts[0]);
+        if (!run) return;
+        var d = parseInt(parts[1], 10), i = run.days.indexOf(d);
+        if (i === -1) run.days.push(d); else run.days.splice(i, 1);
+        saveMaster();
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-master-delete]"), function (b) {
+      b.onclick = function () {
+        var id = b.dataset.masterDelete;
+        showConfirm("Remove this run from the master list? Shifts already entered aren't affected.", function () {
+          state.master.runs = state.master.runs.filter(function (r) { return r.id !== id; });
+          saveMaster();
+        }, "Remove");
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-master-unskip]"), function (b) {
+      b.onclick = function () {
+        state.master.skipDates = state.master.skipDates.filter(function (d) { return d !== b.dataset.masterUnskip; });
+        saveMaster();
+      };
+    });
 
     var draftStartBtn = document.getElementById("draft-start-btn");
     if (draftStartBtn) {
@@ -1147,6 +1326,7 @@
       state.settings = data.settings || { exists: false, employees: [] };
       state.shifts = data.shifts || [];
       state.draftActive = !!(data.draft && data.draft.active);
+      if (data.master) state.master = data.master;
       state.loaded = true;
       // Data is stored either way, above — just skip the re-render (and
       // whatever it would wipe out) while a form is in use. The next
