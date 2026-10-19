@@ -339,7 +339,7 @@
     var warnEl = document.getElementById(warnId);
     var assignEl = document.getElementById(assignId);
     if (!warnEl || !assignEl) return;
-    var name = assignEl.value;
+    var name = readAssignee(assignId) || "";
     var date = document.getElementById(dateId).value;
     var start = document.getElementById(startId).value;
     var end = document.getElementById(endId).value;
@@ -619,7 +619,9 @@
       '<div class="field"><label>End</label><input type="time" id="ed-end" value="' + s.end + '" /></div>' +
       '<div class="field full"><label>Assigned to</label><select id="ed-assign"><option value="">— Leave open —</option>' +
       employees.map(function (n) { return '<option value="' + escapeHtml(n) + '" ' + (s.assignedTo === n ? "selected" : "") + '>' + escapeHtml(n) + '</option>'; }).join("") +
+      (isFleet(s) ? '<option value="__other__"' + (s.assignedTo && employees.indexOf(s.assignedTo) === -1 ? ' selected' : '') + '>Other (type a name)...</option>' : '') +
       '</select></div></div>' +
+      (isFleet(s) ? '<input type="text" id="ed-assign-other" placeholder="Type a name (not on the roster)" value="' + escapeHtml(s.assignedTo && employees.indexOf(s.assignedTo) === -1 ? s.assignedTo : "") + '" style="display:none;width:100%;box-sizing:border-box;margin-bottom:8px;border-radius:8px;border:1px solid var(--line);padding:9px 10px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px;" />' : '') +
       '<div id="ed-conflict" class="warn-text" style="display:none;"></div>' +
       '<div class="form-actions"><button class="btn ghost" data-edit-cancel="' + s.id + '">Cancel</button>' +
       '<button class="btn primary" data-edit-save="' + s.id + '">Save changes</button></div></div>';
@@ -637,7 +639,9 @@
       '<div class="field"><label>End time</label><input type="time" id="ns-end" value="' + d.end + '" /></div>' +
       '<div class="field full"><label>Assign to</label><select id="ns-assign"><option value="">— Leave open —</option>' +
       employees.map(function (n) { return '<option value="' + escapeHtml(n) + '" ' + (d.assignedTo === n ? "selected" : "") + '>' + escapeHtml(n) + '</option>'; }).join("") +
+      (fleet ? '<option value="__other__">Other (type a name)...</option>' : '') +
       '</select></div></div>' +
+      (fleet ? '<input type="text" id="ns-assign-other" placeholder="Type a name (not on the roster)" style="display:none;width:100%;box-sizing:border-box;margin-bottom:8px;border-radius:8px;border:1px solid var(--line);padding:9px 10px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:14px;" />' : '') +
       '<div id="ns-conflict" class="warn-text" style="display:none;"></div>' +
       '<div class="form-actions"><button class="btn primary" id="ns-submit">Post shift</button></div></div>';
   }
@@ -905,6 +909,25 @@
     Array.prototype.forEach.call(inputs, function (inp) { vals[parseInt(inp.dataset.ddupIdx, 10)] = inp.value || ""; });
     state.dayDuplicateDraft[date] = vals;
   }
+  // The "Assign to" select can offer "Other (type a name)" (White Fleet forms only) for
+  // someone who isn't on the roster. Returns the chosen/typed name, or null when
+  // "Other" is picked but the name box is still empty.
+  function readAssignee(selectId) {
+    var sel = document.getElementById(selectId);
+    if (!sel) return "";
+    if (sel.value !== "__other__") return sel.value;
+    var other = document.getElementById(selectId + "-other");
+    var typed = other ? other.value.trim() : "";
+    return typed || null;
+  }
+  function bindOtherAssignee(selectId, rerun) {
+    var sel = document.getElementById(selectId), other = document.getElementById(selectId + "-other");
+    if (!sel || !other) return;
+    function sync() { other.style.display = sel.value === "__other__" ? "block" : "none"; }
+    sel.addEventListener("change", function () { sync(); if (sel.value === "__other__") other.focus(); });
+    other.addEventListener("input", rerun);
+    sync();
+  }
   function bindAdmin() {
     Array.prototype.forEach.call(document.querySelectorAll("[data-past-toggle]"), function (b) { b.onclick = function () { state.pastExpanded = !state.pastExpanded; render(); }; }); Array.prototype.forEach.call(document.querySelectorAll("[data-day-toggle]"), function (b) {
       b.onclick = function () {
@@ -932,18 +955,20 @@
       document.getElementById("ed-start").oninput = runEdCheck;
       document.getElementById("ed-end").oninput = runEdCheck;
       document.getElementById("ed-assign").onchange = runEdCheck;
+      bindOtherAssignee("ed-assign", runEdCheck);
       runEdCheck();
     }
     Array.prototype.forEach.call(document.querySelectorAll("[data-edit-save]"), function (b) {
       b.onclick = function () {
         var id = b.dataset.editSave;
+        if (readAssignee("ed-assign") === null) { toast("Type a name for this entry."); return; }
         api("/api/shifts/" + id + "/update", {
           code: state.adminCode,
           date: document.getElementById("ed-date").value,
           role: document.getElementById("ed-role").value.trim(),
           start: document.getElementById("ed-start").value,
           end: document.getElementById("ed-end").value,
-          assignedTo: document.getElementById("ed-assign").value,
+          assignedTo: readAssignee("ed-assign") || "",
         }).then(function (res) {
           if (res.ok) { state.editingShiftId = null; toast("Shift updated."); refresh(); }
           else if (!handleAuthFailure(res)) toast("Couldn't save changes. Try again.");
@@ -1264,6 +1289,7 @@
       document.getElementById("ns-start").oninput = runNsCheck;
       document.getElementById("ns-end").oninput = runNsCheck;
       document.getElementById("ns-assign").onchange = runNsCheck;
+      bindOtherAssignee("ns-assign", runNsCheck);
       runNsCheck();
     }
     var nsSubmit = document.getElementById("ns-submit");
@@ -1274,9 +1300,10 @@
           start: document.getElementById("ns-start").value || "09:00",
           end: document.getElementById("ns-end").value || "17:00",
           role: document.getElementById("ns-role").value.trim(),
-          assignedTo: document.getElementById("ns-assign").value,
+          assignedTo: readAssignee("ns-assign") || "",
         };
         if (!d.date || !d.start || !d.end) { toast("Please fill in the date and times."); return; }
+        if (readAssignee("ns-assign") === null) { toast("Type a name for this entry."); return; }
         api("/api/shifts/create", Object.assign({ code: state.adminCode, fleet: currentFleet() }, d)).then(function (res) {
           if (res.ok) {
             toast("Shift posted.");
